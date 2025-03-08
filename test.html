@@ -19,9 +19,9 @@
         <font style="font-weight: bolder;font-size: 1.5rem">Setup:</font>
         <br/>
         <label>ProjectID: </label>
-        <input id="projectId" type="text" value="test-479e4"/>
+        <input id="projectId" type="text" value="snapchat-lens-assets"/>
         <label style="margin-left: 20px">ApiKey: </label>
-        <input id="apiKey" style="width: 40%" type="text" value="AIzaSyDhVz11SelnSNwINRESWO2mWqeuoH8lV1c"/>
+        <input id="apiKey" style="width: 40%" type="text" value="AIzaSyC7jsptDS3am4tPx4r3nxis7IMjBc5Dovo"/>
         <button onclick="run()">submit</button>
     </div>
 
@@ -108,8 +108,8 @@
         databaseURL: `https://${projectId}.firebaseio.com`,
         projectId: projectId,
         storageBucket: `${projectId}.appspot.com`,
-        appId: "1:108552699902:web:8377e101c0cb2fbec84aaf",
-        measurementId: "G-G7SE48QM4W"
+        appId: "111",
+        measurementId: "111222"
     };
 
     document.getElementById("configValue").value = JSON.stringify(firebaseConfig, null, 2);
@@ -120,12 +120,20 @@
     const firestore = firebase.firestore();
     const database = firebase.database();
 
+    function displayError(elementId, error) {
+        let errorMessage = error.message || JSON.stringify(error);
+        if (error.details) {
+            errorMessage = error.details.map(detail => detail.message).join(", ");
+        }
+        document.getElementById(elementId).innerHTML = `<font color="green">Not Vulnerable!!! Error: ${errorMessage}</font>`;
+    }
+
     async function testAnonymousLogin() {
         try {
             const result = await auth.signInAnonymously();
             document.getElementById("anonymousStatus").innerHTML = '<font color="red">BUG!!! Token: ' + result.user.uid + '</font>';
         } catch (error) {
-            document.getElementById("anonymousStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("anonymousStatus", error);
         }
     }
 
@@ -134,7 +142,7 @@
             await auth.sendSignInLinkToEmail("test@example.com", { url: firebaseConfig.authDomain, handleCodeInApp: true });
             document.getElementById("linkToEmailStatus").innerHTML = '<font color="red">BUG!!!</font>';
         } catch (error) {
-            document.getElementById("linkToEmailStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("linkToEmailStatus", error);
         }
     }
 
@@ -143,7 +151,7 @@
             const result = await auth.createUserWithEmailAndPassword("test@example.com", "password123");
             document.getElementById("createAccountStatus").innerHTML = '<font color="red">BUG!!! User: ' + result.user.uid + '</font>';
         } catch (error) {
-            document.getElementById("createAccountStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("createAccountStatus", error);
         }
     }
 
@@ -152,7 +160,7 @@
             const result = await auth.signInWithCustomToken("custom-token");
             document.getElementById("tokenStatus").innerHTML = '<font color="red">BUG!!! Token: ' + result.user.uid + '</font>';
         } catch (error) {
-            document.getElementById("tokenStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("tokenStatus", error);
         }
     }
 
@@ -161,7 +169,7 @@
             const result = await auth.signInWithEmailAndPassword("test@example.com", "password123");
             document.getElementById("normalLoginStatus").innerHTML = '<font color="red">BUG!!! User: ' + result.user.uid + '</font>';
         } catch (error) {
-            document.getElementById("normalLoginStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("normalLoginStatus", error);
         }
     }
 
@@ -171,7 +179,7 @@
             await fileRef.put(new Blob(["Hello, world!"], { type: "text/plain" }));
             document.getElementById("storageEditStatus").innerHTML = '<font color="red">BUG!!! File uploaded</font>';
         } catch (error) {
-            document.getElementById("storageEditStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("storageEditStatus", error);
         }
     }
 
@@ -180,7 +188,7 @@
             const result = await storage.ref().listAll();
             document.getElementById("storageViewStatus").innerHTML = '<font color="red">BUG!!! Files listed</font>';
         } catch (error) {
-            document.getElementById("storageViewStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("storageViewStatus", error);
         }
     }
 
@@ -189,7 +197,7 @@
             await firestore.collection("test").doc("testuser").set({ name: "Test User" });
             document.getElementById("firestoreEditStatus").innerHTML = '<font color="red">BUG!!! Document written</font>';
         } catch (error) {
-            document.getElementById("firestoreEditStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("firestoreEditStatus", error);
         }
     }
 
@@ -198,7 +206,7 @@
             const doc = await firestore.collection("test").doc("testuser").get();
             document.getElementById("firestoreViewStatus").innerHTML = '<font color="red">BUG!!! Document read</font>';
         } catch (error) {
-            document.getElementById("firestoreViewStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("firestoreViewStatus", error);
         }
     }
 
@@ -207,7 +215,7 @@
             await database.ref("test").set({ name: "Test User" });
             document.getElementById("dbEditStatus").innerHTML = '<font color="red">BUG!!! Data written</font>';
         } catch (error) {
-            document.getElementById("dbEditStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("dbEditStatus", error);
         }
     }
 
@@ -217,7 +225,7 @@
             document.getElementById("dbViewStatus").innerHTML = '<font color="red">BUG!!! Data read</font>';
             document.getElementById("dbValue").value = JSON.stringify(snapshot.val(), null, 2);
         } catch (error) {
-            document.getElementById("dbViewStatus").innerHTML = '<font color="green">Not Vulnerable!!! Error: ' + error.message + '</font>';
+            displayError("dbViewStatus", error);
         }
     }
 
