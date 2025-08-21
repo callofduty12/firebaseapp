@@ -12,27 +12,43 @@
 
   <script>
     async function searchWord() {
-      let word = document.getElementById("wordInput").value;
+      let word = document.getElementById("wordInput").value.trim();
       let resultDiv = document.getElementById("result");
       resultDiv.innerHTML = "Loading...";
 
       try {
-        // 1. English Meaning + Pronunciation
-        let dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
-        let dictData = await dictRes.json();
-        
-        let meaning = dictData[0].meanings[0].definitions[0].definition;
-        let example = dictData[0].meanings[0].definitions[0].example || "No example available";
-        let audio = dictData[0].phonetics[0]?.audio || "";
+        let meaning = "Not found";
+        let example = "Not available";
+        let audio = "";
 
-        // 2. Hindi Translation (using LibreTranslate free demo)
-        let transRes = await fetch("https://libretranslate.de/translate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ q: word, source: "en", target: "hi" })
-        });
-        let transData = await transRes.json();
-        let hindi = transData.translatedText;
+        // 1. English Meaning + Pronunciation
+        try {
+          let dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+          if (dictRes.ok) {
+            let dictData = await dictRes.json();
+            meaning = dictData[0].meanings[0].definitions[0].definition || meaning;
+            example = dictData[0].meanings[0].definitions[0].example || example;
+            audio = dictData[0].phonetics[0]?.audio || "";
+          }
+        } catch (e) {
+          console.log("Dictionary API error:", e);
+        }
+
+        // 2. Hindi Translation (using LibreTranslate free server)
+        let hindi = "Not available";
+        try {
+          let transRes = await fetch("https://libretranslate.de/translate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ q: word, source: "en", target: "hi" })
+          });
+          if (transRes.ok) {
+            let transData = await transRes.json();
+            hindi = transData.translatedText;
+          }
+        } catch (e) {
+          console.log("Translation API error:", e);
+        }
 
         // Display results
         resultDiv.innerHTML = `
@@ -43,7 +59,8 @@
           ${audio ? `<audio controls src="${audio}"></audio>` : ""}
         `;
       } catch (err) {
-        resultDiv.innerHTML = "Word not found!";
+        resultDiv.innerHTML = "❌ Something went wrong. Try again.";
+        console.log(err);
       }
     }
   </script>
