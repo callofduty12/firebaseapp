@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Dictionary App</title>
+</head>
+<body>
+  <h2>Dictionary (English ↔ Hindi)</h2>
+  <input type="text" id="wordInput" placeholder="Enter word">
+  <button onclick="searchWord()">Search</button>
+  
+  <div id="result"></div>
+
+  <script>
+    async function searchWord() {
+      let word = document.getElementById("wordInput").value;
+      let resultDiv = document.getElementById("result");
+      resultDiv.innerHTML = "Loading...";
+
+      try {
+        // 1. English Meaning + Pronunciation
+        let dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`);
+        let dictData = await dictRes.json();
+        
+        let meaning = dictData[0].meanings[0].definitions[0].definition;
+        let example = dictData[0].meanings[0].definitions[0].example || "No example available";
+        let audio = dictData[0].phonetics[0]?.audio || "";
+
+        // 2. Hindi Translation (using LibreTranslate free demo)
+        let transRes = await fetch("https://libretranslate.de/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ q: word, source: "en", target: "hi" })
+        });
+        let transData = await transRes.json();
+        let hindi = transData.translatedText;
+
+        // Display results
+        resultDiv.innerHTML = `
+          <h3>${word}</h3>
+          <p><b>English Meaning:</b> ${meaning}</p>
+          <p><b>Hindi Meaning:</b> ${hindi}</p>
+          <p><b>Example:</b> ${example}</p>
+          ${audio ? `<audio controls src="${audio}"></audio>` : ""}
+        `;
+      } catch (err) {
+        resultDiv.innerHTML = "Word not found!";
+      }
+    }
+  </script>
+</body>
+</html>
