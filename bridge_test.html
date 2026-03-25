@@ -1,43 +1,120 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Bridge Explorer</title>
+    <title>Complete Bridge Discovery</title>
 </head>
 <body>
-    <h1>Bridge Discovery</h1>
-    <div id="output"></div>
+    <h1>Complete Bridge Discovery</h1>
+    <div id="output" style="font-family: monospace; white-space: pre-wrap;"></div>
     <script>
         function log(msg) {
-            document.getElementById('output').innerHTML += msg + '<br>';
+            const output = document.getElementById('output');
+            output.innerHTML += msg + '<br>';
             console.log(msg);
         }
         
-        // Check all window properties for potential bridges
+        log('=== Bridge Discovery Started ===');
+        log('User Agent: ' + navigator.userAgent);
+        
+        // Method 1: Check all window properties
+        log('\n--- Checking all window properties ---');
+        let allProps = [];
         for (var prop in window) {
-            if (prop.toLowerCase().includes('amazon') || 
-                prop.toLowerCase().includes('bridge') ||
-                prop.toLowerCase().includes('native') ||
-                prop.toLowerCase().includes('android') ||
-                prop.toLowerCase().includes('webview')) {
-                log('Found: ' + prop + ' = ' + typeof window[prop]);
-                try {
-                    if (typeof window[prop] === 'object') {
-                        for (var method in window[prop]) {
-                            log('  Method: ' + method);
-                        }
-                    }
-                } catch(e) {}
+            allProps.push(prop);
+            if (allProps.length > 200) break;
+        }
+        log('Total properties: ' + allProps.length);
+        
+        // Method 2: Search for specific patterns
+        log('\n--- Searching for interfaces ---');
+        const patterns = ['amazon', 'bridge', 'native', 'android', 'webview', 'app', 'mobile', 'js', 'call', 'invoke', 'nativeBridge', 'androidBridge'];
+        
+        let found = [];
+        for (var prop in window) {
+            const lower = prop.toLowerCase();
+            for (const pattern of patterns) {
+                if (lower.includes(pattern)) {
+                    found.push(prop);
+                    break;
+                }
             }
         }
         
-        // Check for common Android interfaces
-        if (window.AmazonBridge) log('AmazonBridge exists');
-        if (window.nativeBridge) log('nativeBridge exists');
-        if (window.Android) log('Android exists');
-        if (window.JSBridge) log('JSBridge exists');
+        if (found.length === 0) {
+            log('No interfaces found with common patterns');
+        } else {
+            log('Found ' + found.length + ' potential interfaces:');
+            for (const prop of found) {
+                log('  - ' + prop + ' (type: ' + typeof window[prop] + ')');
+                try {
+                    if (typeof window[prop] === 'object' && window[prop] !== null) {
+                        let methods = Object.keys(window[prop]);
+                        if (methods.length > 0) {
+                            log('    Methods: ' + methods.slice(0, 10).join(', '));
+                        }
+                    }
+                } catch(e) {
+                    log('    Error accessing: ' + e.message);
+                }
+            }
+        }
         
-        // Check document for any special objects
-        log('Document.domain: ' + document.domain);
+        // Method 3: Check if console is modified
+        log('\n--- Checking console ---');
+        if (console.log.toString().includes('native')) {
+            log('Console appears to be native');
+        }
+        
+        // Method 4: Check if alert is overridden
+        log('\n--- Checking alert behavior ---');
+        try {
+            alert('Test alert - this should pop up if allowed');
+            log('Alert executed successfully');
+        } catch(e) {
+            log('Alert failed: ' + e.message);
+        }
+        
+        // Method 5: Check for postMessage
+        log('\n--- Setting up postMessage listener ---');
+        window.addEventListener('message', function(e) {
+            log('PostMessage received from: ' + e.origin);
+            log('Data: ' + JSON.stringify(e.data));
+        });
+        
+        // Method 6: Check for WebView specific objects
+        log('\n--- Checking WebView objects ---');
+        const webviewProps = ['Android', 'webkit', 'external', 'chrome', 'JavaBridge', 'JSBridge'];
+        for (const prop of webviewProps) {
+            if (window[prop] !== undefined) {
+                log('Found: ' + prop + ' (type: ' + typeof window[prop] + ')');
+            }
+        }
+        
+        // Method 7: Try to list all properties with Object.keys
+        log('\n--- Attempting to enumerate all enumerable properties ---');
+        try {
+            let enumerableProps = Object.keys(window);
+            log('Enumerable properties count: ' + enumerableProps.length);
+            if (enumerableProps.length > 0) {
+                log('First 20: ' + enumerableProps.slice(0, 20).join(', '));
+            }
+        } catch(e) {
+            log('Cannot enumerate: ' + e.message);
+        }
+        
+        // Method 8: Check for XSS opportunities
+        log('\n--- Checking for potential injection points ---');
+        try {
+            // Check if you can access parent
+            if (window.parent !== window) {
+                log('Frame detected! Parent origin: ' + window.parent.location.origin);
+            }
+        } catch(e) {
+            log('Cross-origin frame access blocked (expected)');
+        }
+        
+        log('\n=== Bridge Discovery Complete ===');
+        log('Note: If you didn\'t see an alert popup, it was likely blocked or you clicked "OK" on a previous one.');
     </script>
 </body>
 </html>
