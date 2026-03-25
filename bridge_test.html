@@ -1,14 +1,45 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>JS Injection Test</title>
+    <title>Bridge Discovery</title>
 </head>
 <body>
-    <h1>JS Injection Test</h1>
+    <h1>Testing Amazon Bridge</h1>
+    <div id="output"></div>
     <script>
-        alert(1);
-        // Your injection code here
-        console.log("JS Injection executed!");
+        function log(msg) {
+            document.getElementById('output').innerHTML += msg + '<br>';
+            console.log(msg);
+        }
+        
+        log('Checking for Amazon interfaces...');
+        
+        // Check for common Android WebView interfaces
+        var interfaces = [];
+        for (var prop in window) {
+            if (prop.toLowerCase().includes('amazon') || 
+                prop.toLowerCase().includes('bridge') ||
+                prop.toLowerCase().includes('native') ||
+                prop.toLowerCase().includes('android')) {
+                interfaces.push(prop);
+                log('Found: ' + prop);
+            }
+        }
+        
+        // Check for Java Bridge (legacy)
+        if (window.amazon) log('window.amazon exists');
+        if (window.AmazonBridge) log('window.AmazonBridge exists');
+        if (window.nativeBridge) log('window.nativeBridge exists');
+        if (window.JSBridge) log('window.JSBridge exists');
+        
+        // Try to trigger alert via different methods
+        try {
+            alert('Alert test');
+        } catch(e) {
+            log('Alert blocked: ' + e);
+        }
+        
+        log('Bridge discovery complete');
     </script>
 </body>
 </html>
