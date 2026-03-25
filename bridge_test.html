@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bridge Discovery</title>
+    <title>Amazon Bridge Explorer</title>
 </head>
 <body>
-    <h1>Testing Amazon Bridge</h1>
+    <h1>Bridge Discovery</h1>
     <div id="output"></div>
     <script>
         function log(msg) {
@@ -12,34 +12,32 @@
             console.log(msg);
         }
         
-        log('Checking for Amazon interfaces...');
-        
-        // Check for common Android WebView interfaces
-        var interfaces = [];
+        // Check all window properties for potential bridges
         for (var prop in window) {
             if (prop.toLowerCase().includes('amazon') || 
                 prop.toLowerCase().includes('bridge') ||
                 prop.toLowerCase().includes('native') ||
-                prop.toLowerCase().includes('android')) {
-                interfaces.push(prop);
-                log('Found: ' + prop);
+                prop.toLowerCase().includes('android') ||
+                prop.toLowerCase().includes('webview')) {
+                log('Found: ' + prop + ' = ' + typeof window[prop]);
+                try {
+                    if (typeof window[prop] === 'object') {
+                        for (var method in window[prop]) {
+                            log('  Method: ' + method);
+                        }
+                    }
+                } catch(e) {}
             }
         }
         
-        // Check for Java Bridge (legacy)
-        if (window.amazon) log('window.amazon exists');
-        if (window.AmazonBridge) log('window.AmazonBridge exists');
-        if (window.nativeBridge) log('window.nativeBridge exists');
-        if (window.JSBridge) log('window.JSBridge exists');
+        // Check for common Android interfaces
+        if (window.AmazonBridge) log('AmazonBridge exists');
+        if (window.nativeBridge) log('nativeBridge exists');
+        if (window.Android) log('Android exists');
+        if (window.JSBridge) log('JSBridge exists');
         
-        // Try to trigger alert via different methods
-        try {
-            alert('Alert test');
-        } catch(e) {
-            log('Alert blocked: ' + e);
-        }
-        
-        log('Bridge discovery complete');
+        // Check document for any special objects
+        log('Document.domain: ' + document.domain);
     </script>
 </body>
 </html>
