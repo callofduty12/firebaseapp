@@ -74,25 +74,38 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">continueUrl allow-list check</span><span class="status info" id="continueUrlStatus">N/A</span></div>
 <div class="row"><span class="label">Token claims</span><span class="status info" id="tokenClaims">N/A</span></div>
 <div class="row"><span class="label">accounts:lookup (custom claims)</span><span class="status info" id="lookupStatus">N/A</span></div>
+<div class="row"><span class="label">getProjectConfig leak (domains/IdPs)</span><span class="status info" id="projectConfigStatus">N/A</span></div>
+<div class="row"><span class="label">API key referrer restriction</span><span class="status info" id="keyRestrictStatus">N/A</span></div>
+<div class="row"><span class="label">Login error enumeration oracle</span><span class="status info" id="loginEnumStatus">N/A</span></div>
+<div class="row"><span class="label">Password policy (weak pw signup)</span><span class="status info" id="pwPolicyStatus">N/A</span></div>
 <textarea id="claimsValue" cols="100" rows="6" readonly></textarea>
+<textarea id="projectConfigValue" cols="100" rows="6" readonly placeholder="getProjectConfig response"></textarea>
 
 <h3>2. Firestore</h3>
 <div class="row"><span class="label">List root collections</span><span class="status info" id="fsListStatus">N/A</span></div>
 <div class="row"><span class="label">Read test doc</span><span class="status info" id="firestoreViewStatus">N/A</span></div>
 <div class="row"><span class="label">Write test doc</span><span class="status info" id="firestoreEditStatus">N/A</span></div>
 <div class="row"><span class="label">Field injection (isAdmin/role/balance)</span><span class="status info" id="fsInjectStatus">N/A</span></div>
+<div class="row"><span class="label">:listCollectionIds (enumerate)</span><span class="status info" id="fsListIdsStatus">N/A</span></div>
+<div class="row"><span class="label">:runQuery structured read</span><span class="status info" id="fsQueryStatus">N/A</span></div>
+<div class="row"><span class="label">:runAggregationQuery COUNT() oracle</span><span class="status info" id="fsCountStatus">N/A</span></div>
+<div class="row"><span class="label">collectionGroup (subcollection read)</span><span class="status info" id="fsGroupStatus">N/A</span></div>
 <div class="row"><span class="label">App Check enforcement</span><span class="status info" id="appCheckStatus">N/A</span></div>
 <textarea id="fsListValue" cols="100" rows="6" readonly></textarea>
 
 <h3>3. Realtime Database</h3>
 <div class="row"><span class="label">Shallow root read</span><span class="status info" id="dbViewStatus">N/A</span></div>
 <div class="row"><span class="label">Write test value</span><span class="status info" id="dbEditStatus">N/A</span></div>
+<div class="row"><span class="label">Security rules leak (.settings/rules.json)</span><span class="status info" id="dbRulesStatus">N/A</span></div>
+<div class="row"><span class="label">Query read (/users orderBy)</span><span class="status info" id="dbQueryStatus">N/A</span></div>
 <textarea id="dbValue" cols="100" rows="4" readonly></textarea>
 
 <h3>4. Cloud Storage</h3>
 <div class="row"><span class="label">List root</span><span class="status info" id="storageViewStatus">N/A</span></div>
 <div class="row"><span class="label">Upload test file</span><span class="status info" id="storageEditStatus">N/A</span></div>
 <div class="row"><span class="label">Upload HTML (XSS probe)</span><span class="status info" id="storageXssStatus">N/A</span></div>
+<div class="row"><span class="label">GCS IAM list (bypasses FB rules)</span><span class="status info" id="gcsIamStatus">N/A</span></div>
+<div class="row"><span class="label">Bucket metadata (location/class)</span><span class="status info" id="gcsMetaStatus">N/A</span></div>
 
 <h3>5. Cloud Functions (best-effort probe)</h3>
 <div class="row"><span class="label">Common names × regions</span><span class="status info" id="functionsStatus">N/A</span></div>
@@ -100,6 +113,14 @@ requests (CORS). For a complete audit including those, use the companion Python 
 
 <h3>6. Hosting / Config Leak</h3>
 <div class="row"><span class="label">init.js reachable</span><span class="status info" id="initJsStatus">N/A</span></div>
+
+<h3>7. Firebase Installations / Project recon</h3>
+<div class="row"><span class="label">Installations open registration</span><span class="status info" id="installStatus">N/A</span></div>
+<div class="row"><span class="label">Project number</span><span class="status info" id="projNumStatus">N/A</span></div>
+
+<h3>8. Remote Config leak</h3>
+<div class="row"><span class="label">Public template fetch</span><span class="status info" id="remoteConfigStatus">N/A</span></div>
+<textarea id="remoteConfigValue" cols="100" rows="6" readonly></textarea>
 
 <h3>Summary</h3>
 <div id="summary"></div>
@@ -577,6 +598,276 @@ async function initJsProbe() {
     }
 }
 
+/* ============================ 1b. AUTH EXTRAS ============================ */
+let PROJECT_NUMBER = null;
+
+// Legacy relyingparty endpoint: leaks authorizedDomains + enabled IdPs with only the apiKey.
+async function getProjectConfigLeak() {
+    const url = `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=${cfg.apiKey}`;
+    const r = await fetchJson(url);
+    if (r.status === 0) { setStatus("projectConfigStatus", "CORS-blocked / unreachable", "info"); return; }
+    if (r.ok && r.body && typeof r.body === "object") {
+        const domains = r.body.authorizedDomains || [];
+        const idps = (r.body.idpConfig || []).filter(i => i.enabled).map(i => i.provider);
+        document.getElementById("projectConfigValue").value = JSON.stringify(r.body, null, 2);
+        setStatus("projectConfigStatus", `domains=${domains.length} idps=[${idps.join(",") || "none"}]`, "warn");
+        finding("LOW", "Project config readable (getProjectConfig)",
+            `authorizedDomains=[${domains.join(", ")}] enabledIdPs=[${idps.join(", ") || "none"}]`);
+        if (domains.includes("localhost"))
+            finding("INFO", "localhost in authorizedDomains", "OAuth sign-in redirect allowed to localhost");
+    } else {
+        setStatus("projectConfigStatus", "HTTP " + r.status, "info");
+    }
+}
+
+// If this cross-origin call from the current page's origin succeeds, the API key is
+// NOT HTTP-referrer restricted -> it can be lifted and reused from any site.
+async function apiKeyRestrictionProbe() {
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({identifier: "probe@example.invalid", continueUri: "http://localhost"})
+    });
+    if (r.status === 0) { setStatus("keyRestrictStatus", "CORS-blocked", "info"); return; }
+    if (r.status === 403 && /referer|referrer|API_KEY_HTTP_REFERRER_BLOCKED|requests-from-referer/i.test(r.text)) {
+        setStatus("keyRestrictStatus", "Restricted (referrer lock active)", "ok");
+    } else {
+        setStatus("keyRestrictStatus", "NOT referrer-restricted — key reusable from any origin", "warn");
+        finding("LOW", "API key not HTTP-referrer restricted",
+            "Identity Toolkit accepted this apiKey from an arbitrary origin; the key can be extracted and reused anywhere.");
+    }
+}
+
+// signInWithPassword against a random email: distinct EMAIL_NOT_FOUND vs INVALID_PASSWORD leaks
+// account existence. A generic INVALID_LOGIN_CREDENTIALS means enumeration protection is ON.
+async function loginEnumOracle() {
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: "probe_" + Date.now() + "@example.invalid", password: "x", returnSecureToken: true})
+    });
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("loginEnumStatus", "CORS-blocked", "info"); return; }
+    if (/INVALID_LOGIN_CREDENTIALS/.test(msg)) {
+        setStatus("loginEnumStatus", "Protected (generic error — enumeration protection ON)", "ok");
+    } else if (/EMAIL_NOT_FOUND|INVALID_PASSWORD/.test(msg)) {
+        setStatus("loginEnumStatus", "VULNERABLE — distinct errors leak existence (" + msg + ")", "bad");
+        finding("MEDIUM", "User enumeration via password login",
+            "signInWithPassword returns distinct EMAIL_NOT_FOUND vs INVALID_PASSWORD — email-enumeration protection is OFF.");
+    } else {
+        setStatus("loginEnumStatus", msg || ("HTTP " + r.status), "info");
+    }
+}
+
+// Create an account with a trivially weak password to gauge policy + open signup.
+async function passwordPolicyProbe() {
+    if (READ_ONLY) { setStatus("pwPolicyStatus", "skipped (read-only)", "info"); return; }
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: "pwtest_" + Date.now() + "@example.invalid", password: "123456", returnSecureToken: true})
+    });
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("pwPolicyStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body.idToken) {
+        setStatus("pwPolicyStatus", "WEAK — '123456' accepted, open signup", "bad");
+        finding("MEDIUM", "Weak password policy + open signup", "Account created with password '123456'.");
+    } else if (/WEAK_PASSWORD|PASSWORD_DOES_NOT_MEET/i.test(msg)) {
+        setStatus("pwPolicyStatus", "Policy enforced (weak pw rejected)", "ok");
+    } else if (/OPERATION_NOT_ALLOWED|ADMIN_ONLY_OPERATION|EMAIL_EXISTS/i.test(msg)) {
+        setStatus("pwPolicyStatus", "Signup closed (" + msg + ")", "ok");
+    } else {
+        setStatus("pwPolicyStatus", msg || ("HTTP " + r.status), "info");
+    }
+}
+
+/* ============================ 2b. FIRESTORE EXTRAS ============================ */
+const FS_DB = () => `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents`;
+
+async function firestoreListCollectionIds() {
+    const url = `${FS_DB()}:listCollectionIds?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json", ...authHeaders()}, body: "{}"});
+    if (r.status === 0) { setStatus("fsListIdsStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.collectionIds) {
+        const ids = r.body.collectionIds;
+        setStatus("fsListIdsStatus", `Leaked ${ids.length} collection ID(s): ${ids.join(", ")}`, "bad");
+        finding(idToken ? "HIGH" : "CRITICAL", "Firestore collection IDs enumerable", ids.join(", "));
+    } else if (r.status === 403) {
+        setStatus("fsListIdsStatus", "Denied (403)", "ok");
+    } else {
+        setStatus("fsListIdsStatus", "HTTP " + r.status, "warn");
+    }
+}
+
+async function firestoreRunQuery() {
+    const url = `${FS_DB()}:runQuery?key=${cfg.apiKey}`;
+    const body = {structuredQuery: {from: [{collectionId: "users"}], limit: 5}};
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if (r.status === 0) { setStatus("fsQueryStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && Array.isArray(r.body)) {
+        const docs = r.body.filter(x => x.document);
+        if (docs.length) {
+            setStatus("fsQueryStatus", `runQuery read ${docs.length} doc(s) from 'users'`, "bad");
+            finding(idToken ? "HIGH" : "CRITICAL", "Firestore readable via :runQuery", `'users' structured query returned ${docs.length} docs`);
+        } else {
+            setStatus("fsQueryStatus", "query ok, 0 docs (empty/filtered)", "info");
+        }
+    } else if (r.status === 403) {
+        setStatus("fsQueryStatus", "Denied (403)", "ok");
+    } else {
+        setStatus("fsQueryStatus", "HTTP " + r.status, "warn");
+    }
+}
+
+// COUNT() leaks a collection's size without reading document contents.
+async function firestoreCountOracle() {
+    const url = `${FS_DB()}:runAggregationQuery?key=${cfg.apiKey}`;
+    const body = {structuredAggregationQuery: {
+        structuredQuery: {from: [{collectionId: "users"}]},
+        aggregations: [{alias: "n", count: {}}]
+    }};
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if (r.status === 0) { setStatus("fsCountStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && Array.isArray(r.body) && r.body[0] && r.body[0].result) {
+        const n = (((r.body[0].result.aggregateFields || {}).n) || {}).integerValue;
+        setStatus("fsCountStatus", `COUNT('users') = ${n}`, "bad");
+        finding("MEDIUM", "Firestore COUNT() aggregation oracle", `users collection size leaked via :runAggregationQuery = ${n} (without reading docs)`);
+    } else if (r.status === 403) {
+        setStatus("fsCountStatus", "Denied (403)", "ok");
+    } else {
+        setStatus("fsCountStatus", "HTTP " + r.status, "info");
+    }
+}
+
+async function firestoreCollectionGroup() {
+    const url = `${FS_DB()}:runQuery?key=${cfg.apiKey}`;
+    const body = {structuredQuery: {from: [{collectionId: "users", allDescendants: true}], limit: 5}};
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if (r.status === 0) { setStatus("fsGroupStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && Array.isArray(r.body)) {
+        const docs = r.body.filter(x => x.document);
+        if (docs.length) {
+            setStatus("fsGroupStatus", `collectionGroup('users') read ${docs.length} nested doc(s)`, "bad");
+            finding(idToken ? "HIGH" : "CRITICAL", "Firestore collectionGroup readable", `nested 'users' subcollections exposed (${docs.length} docs)`);
+        } else {
+            setStatus("fsGroupStatus", "group query ok, 0 docs", "info");
+        }
+    } else if (r.status === 403) {
+        setStatus("fsGroupStatus", "Denied (403)", "ok");
+    } else {
+        setStatus("fsGroupStatus", "HTTP " + r.status, "info");
+    }
+}
+
+/* ============================ 3b. RTDB EXTRAS ============================ */
+// A 200 on /.settings/rules.json (which normally needs the DB secret) means the ruleset is disclosed.
+async function rtdbRulesLeak() {
+    const base = cfg.databaseURL.replace(/\/$/, "");
+    const u = `${base}/.settings/rules.json` + (idToken ? "?auth=" + encodeURIComponent(idToken) : "");
+    const r = await fetchJson(u);
+    if (r.status === 0) { setStatus("dbRulesStatus", "CORS-blocked / unreachable", "info"); return; }
+    if (r.ok && r.text && r.text !== "null") {
+        setStatus("dbRulesStatus", "RULES LEAKED (readable)", "bad");
+        finding("HIGH", "RTDB security rules disclosed", "/.settings/rules.json returned 200 — full ruleset readable");
+        document.getElementById("dbValue").value = String(r.text).slice(0, 4000);
+    } else {
+        setStatus("dbRulesStatus", "Protected (" + r.status + ")", "ok");
+    }
+}
+
+async function rtdbQueryRead() {
+    const base = cfg.databaseURL.replace(/\/$/, "");
+    const q = `orderBy=%22%24key%22&limitToFirst=3` + (idToken ? "&auth=" + encodeURIComponent(idToken) : "");
+    const u = `${base}/users.json?${q}`;
+    const r = await fetchJson(u);
+    if (r.status === 0) { setStatus("dbQueryStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.text && r.text !== "null") {
+        setStatus("dbQueryStatus", "/users node query READABLE", "bad");
+        finding(idToken ? "HIGH" : "CRITICAL", "RTDB /users readable via query", "orderBy query returned data");
+    } else if (r.status === 400 && /index/i.test(r.text)) {
+        setStatus("dbQueryStatus", "read allowed, needs index (node exists)", "warn");
+    } else {
+        setStatus("dbQueryStatus", "Denied/empty (" + r.status + ")", "ok");
+    }
+}
+
+/* ============================ 4b. STORAGE / GCS IAM ============================ */
+// storage.googleapis.com honors GCS IAM, NOT Firebase Storage rules — a separate, often-missed surface.
+// A bucket made public at the IAM layer is listable/readable here even when Firebase rules deny.
+async function gcsDirectList() {
+    const url = `https://storage.googleapis.com/storage/v1/b/${cfg.storageBucket}/o?maxResults=10`;
+    const r = await fetchJson(url);
+    if (r.status === 0) { setStatus("gcsIamStatus", "CORS-blocked (no bucket CORS for this origin)", "info"); return; }
+    if (r.ok) {
+        const items = r.body.items || [];
+        setStatus("gcsIamStatus", `GCS IAM list OK: ${items.length} object(s) — bucket public at IAM layer`, "bad");
+        finding("CRITICAL", "Bucket publicly listable via GCS IAM",
+            `${cfg.storageBucket} — allUsers has storage.objects.list (bypasses Firebase Storage rules entirely)`);
+    } else if (r.status === 403) {
+        setStatus("gcsIamStatus", "GCS IAM denied (403) — not IAM-public", "ok");
+    } else {
+        setStatus("gcsIamStatus", "HTTP " + r.status, "info");
+    }
+}
+
+async function gcsBucketMeta() {
+    const url = `https://storage.googleapis.com/storage/v1/b/${cfg.storageBucket}`;
+    const r = await fetchJson(url);
+    if (r.status === 0) { setStatus("gcsMetaStatus", "CORS-blocked", "info"); return; }
+    if (r.ok) {
+        const loc = r.body.location || "?";
+        setStatus("gcsMetaStatus", `Metadata readable (location=${loc}, class=${r.body.storageClass || "?"})`, "warn");
+        finding("LOW", "Bucket metadata readable", `${cfg.storageBucket} location=${loc} storageClass=${r.body.storageClass || "?"}`);
+    } else {
+        setStatus("gcsMetaStatus", "Denied (" + r.status + ")", "ok");
+    }
+}
+
+/* ============================ 7. INSTALLATIONS / RECON ============================ */
+// Registering a Firebase Installation leaks the numeric project number and yields a FIS auth token.
+async function installationsRegister() {
+    const url = `https://firebaseinstallations.googleapis.com/v1/projects/${cfg.projectId}/installations`;
+    const r = await fetchJson(url, {
+        method: "POST",
+        headers: {"Content-Type": "application/json", "x-goog-api-key": cfg.apiKey},
+        body: JSON.stringify({appId: cfg.appId || "1:111:web:111", authVersion: "FIS_v2", sdkVersion: "w:0.6.4"})
+    });
+    if (r.status === 0) { setStatus("installStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body) {
+        const name = r.body.name || "";                 // projects/<NUMBER>/installations/<fid>
+        PROJECT_NUMBER = name.split("/")[1] || PROJECT_NUMBER;
+        const hasToken = !!(r.body.authToken && r.body.authToken.token);
+        setStatus("installStatus", `Registered (FIS token: ${hasToken ? "issued" : "none"})`, "warn");
+        setStatus("projNumStatus", PROJECT_NUMBER ? ("Project number: " + PROJECT_NUMBER) : "unknown", "info");
+        finding("INFO", "Firebase Installations open registration",
+            `Anonymous installation accepted; projectNumber=${PROJECT_NUMBER || "?"}, FIS token ${hasToken ? "issued" : "not issued"}`);
+    } else {
+        setStatus("installStatus", "HTTP " + r.status + " " + ((r.body && r.body.error && r.body.error.message) || ""), "info");
+    }
+}
+
+/* ============================ 8. REMOTE CONFIG ============================ */
+async function remoteConfigFetch() {
+    if (!PROJECT_NUMBER) { setStatus("remoteConfigStatus", "needs project number (run Installations first)", "info"); return; }
+    const url = `https://firebaseremoteconfig.googleapis.com/v1/projects/${PROJECT_NUMBER}/namespaces/firebase:fetch?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({appInstanceId: "fbaudit_" + Date.now(), appId: cfg.appId || "1:111:web:111"})
+    });
+    if (r.status === 0) { setStatus("remoteConfigStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body) {
+        const entries = r.body.entries || {};
+        const keys = Object.keys(entries);
+        document.getElementById("remoteConfigValue").value = JSON.stringify(r.body, null, 2);
+        setStatus("remoteConfigStatus", keys.length ? `Fetched ${keys.length} param(s): ${keys.slice(0, 8).join(", ")}` : "No params / NO_TEMPLATE", keys.length ? "warn" : "info");
+        if (keys.length) finding("LOW", "Remote Config parameters readable", `Leaked keys: ${keys.join(", ")}`);
+        if (/key|token|secret|endpoint|password|url/i.test(JSON.stringify(entries)))
+            finding("MEDIUM", "Remote Config may contain sensitive values", "Inspect params for API keys / endpoints / feature flags");
+    } else {
+        setStatus("remoteConfigStatus", "HTTP " + r.status, "info");
+    }
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -584,6 +875,7 @@ async function initJsProbe() {
 async function run(readOnly = false) {
     READ_ONLY = readOnly;
     FINDINGS = [];
+    PROJECT_NUMBER = null;
     document.getElementById("summary").innerHTML = "";
     buildConfig();
 
@@ -616,20 +908,32 @@ async function run(readOnly = false) {
     await oobEnum();
     await continueUrlProbe();
     await lookupAndClaims();
+    await getProjectConfigLeak();
+    await apiKeyRestrictionProbe();
+    await loginEnumOracle();
+    await passwordPolicyProbe();
 
     // 2. Firestore
     await firestoreListRoot();
+    await firestoreListCollectionIds();
     await firestoreReadTest();
+    await firestoreRunQuery();
+    await firestoreCountOracle();
+    await firestoreCollectionGroup();
     await firestoreWriteTest();
     await firestoreFieldInjection();
     await appCheckProbe();
 
     // 3. RTDB
     await rtdbShallow();
+    await rtdbRulesLeak();
+    await rtdbQueryRead();
     await rtdbWriteTest();
 
     // 4. Storage
     await storageList();
+    await gcsDirectList();
+    await gcsBucketMeta();
     await storageUploadTest();
     await storageUploadXss();
 
@@ -638,6 +942,10 @@ async function run(readOnly = false) {
 
     // 6. Hosting
     await initJsProbe();
+
+    // 7. Installations / recon  (8. Remote Config needs the project number this yields)
+    await installationsRegister();
+    await remoteConfigFetch();
 
     // summary counts
     const tally = {};
