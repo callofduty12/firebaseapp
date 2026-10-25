@@ -1,249 +1,504 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Firebase Test Automation</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Firebase Security Auditor (Browser)</title>
+<style>
+  :root{--bg:#0f1116;--panel:#171a21;--panel2:#1e222b;--fg:#e6e9ef;--mut:#8b93a7;
+        --crit:#ff5c5c;--high:#ff8a5c;--med:#ffd166;--low:#5cc8ff;--ok:#5cffa1;--acc:#7c5cff;}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--bg);color:var(--fg)}
+  header{padding:16px 20px;background:linear-gradient(90deg,#1a1330,#0f1116 60%);border-bottom:1px solid #2a2f3a;
+         display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  header h1{margin:0;font-size:16px;letter-spacing:.5px}
+  header .badge{background:#ffd166;color:#111;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}
+  main{display:grid;grid-template-columns:380px 1fr;gap:14px;padding:14px;max-width:1500px;margin:0 auto}
+  @media(max-width:900px){main{grid-template-columns:1fr}}
+  section{background:var(--panel);border:1px solid #262b36;border-radius:10px;padding:14px}
+  section h2{margin:0 0 10px;font-size:13px;color:var(--acc);text-transform:uppercase;letter-spacing:1px}
+  label{display:block;font-size:12px;color:var(--mut);margin-top:8px}
+  input[type=text],input[type=password]{width:100%;padding:8px 10px;margin-top:4px;background:var(--panel2);
+      border:1px solid #2c3140;border-radius:6px;color:var(--fg);font:inherit}
+  input:focus{outline:none;border-color:var(--acc)}
+  .row{display:flex;gap:8px;margin-top:8px}
+  .row input{flex:1}
+  button{cursor:pointer;border:none;border-radius:6px;padding:9px 14px;font:inherit;font-weight:600}
+  .btn-primary{background:var(--acc);color:#fff}
+  .btn-primary:disabled{background:#3a3455;color:#8a83a8;cursor:not-allowed}
+  .btn-ghost{background:var(--panel2);color:var(--fg);border:1px solid #2c3140}
+  .check{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--mut)}
+  .check input{width:16px;height:16px}
+  #log{background:#0b0d12;border:1px solid #262b36;border-radius:6px;padding:10px;height:520px;
+       overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.45}
+  .sev{display:inline-block;padding:0 6px;border-radius:3px;font-weight:700;font-size:10px;margin-right:6px}
+  .CRITICAL{background:var(--crit);color:#111}
+  .HIGH{background:var(--high);color:#111}
+  .MEDIUM{background:var(--med);color:#111}
+  .LOW{background:var(--low);color:#111}
+  .INFO{background:#3a3f4b;color:#cfd6e6}
+  .ok{color:var(--ok)} .bad{color:var(--crit)} .warn{color:var(--med)} .info{color:var(--low)} .dim{color:var(--mut)}
+  .hdr{border-top:1px solid #262b36;margin:10px 0;padding-top:8px;color:var(--acc);font-weight:700}
+  #summary{margin-top:12px;font-size:12px;line-height:1.8}
+  #summary .pill{display:inline-block;padding:3px 10px;border-radius:20px;margin-right:6px;background:var(--panel2);
+                 border:1px solid #2c3140}
+  footer{padding:10px 20px;color:var(--mut);font-size:11px;text-align:center}
+  #progress{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:10px}
+  #progress>div{height:100%;width:0;background:var(--acc);transition:width .3s}
+</style>
 </head>
 <body>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-analytics.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-firestore.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-functions.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-messaging.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-storage.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-performance.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.6.1/firebase-remote-config.js"></script>
 
-<div>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Setup:</font>
-        <br/>
-        <label>ProjectID: </label>
-        <input id="projectId" type="text" value="snapchat-lens-assets"/>
-        <label style="margin-left: 20px">ApiKey: </label>
-        <input id="apiKey" style="width: 40%" type="text" value="AIzaSyC7jsptDS3am4tPx4r3nxis7IMjBc5Dovo"/>
-        <button onclick="run()">submit</button>
+<header>
+  <h1>🔥 Firebase Security Auditor</h1>
+  <span class="badge">AUTHORIZED TESTING ONLY</span>
+  <span class="dim" style="margin-left:auto">Browser mode · Pyodide (CPython wasm)</span>
+</header>
+
+<main>
+  <section>
+    <h2>Target</h2>
+    <label>Project ID</label>
+    <input id="project" type="text" placeholder="my-project" autocomplete="off"/>
+
+    <label>API Key</label>
+    <input id="apikey" type="password" placeholder="AIza..." autocomplete="off"/>
+
+    <label>Storage bucket (optional · default: &lt;project&gt;.appspot.com)</label>
+    <input id="bucket" type="text" placeholder="my-project.appspot.com" autocomplete="off"/>
+
+    <label>Realtime DB URL (optional · CORS often blocks in browser)</label>
+    <input id="rtdb" type="text" placeholder="https://my-project-default-rtdb.firebaseio.com" autocomplete="off"/>
+
+    <label>Test email (optional — will signup/login)</label>
+    <input id="email" type="text" placeholder="tester@example.com" autocomplete="off"/>
+    <label>Test password</label>
+    <input id="password" type="password" placeholder="P@ssw0rd!"/>
+
+    <label>Emails to enumerate (comma-separated, optional)</label>
+    <input id="enumEmails" type="text" placeholder="a@x.com,b@y.com"/>
+
+    <div class="check">
+      <input id="noWrite" type="checkbox"/>
+      <span>Read-only mode (skip all write probes)</span>
+    </div>
+    <div class="check">
+      <input id="authz" type="checkbox"/>
+      <span>I own this project OR have <b>written authorization</b> to test it.</span>
     </div>
 
-    <hr/>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Config:</font>
-        <br/>
-        <textarea cols="100" rows="10" disabled style="overflow:auto;resize:none" id="configValue"></textarea>
+    <div class="row" style="margin-top:14px">
+      <button id="run" class="btn-primary" disabled>▶ Run Audit</button>
+      <button id="stop" class="btn-ghost">■ Clear</button>
     </div>
 
-    <hr/>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Login testing:</font>
-        <br/>
-        <font style="font-size: 1.2rem">Anonymous Login Status: </font>
-        <font id="anonymousStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">Signin Link To Email Login Status: </font>
-        <font id="linkToEmailStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">Create Account to Login Status: </font>
-        <font id="createAccountStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">Token Login Status: </font>
-        <font id="tokenStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">Normal Login Status: </font>
-        <font id="normalLoginStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-    </div>
+    <div id="progress"><div></div></div>
 
-    <hr/>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Firebase Storage:</font>
-        <br/>
-        <font style="font-size: 1.2rem">Upload Status: </font>
-        <font id="storageEditStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">View Status: </font>
-        <font id="storageViewStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-    </div>
+    <h2 style="margin-top:18px">Summary</h2>
+    <div id="summary" class="dim">No findings yet.</div>
+  </section>
 
-    <hr/>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Firebase Firestore:</font>
-        <br/>
-        <font style="font-size: 1.2rem">Edit Status: </font>
-        <font id="firestoreEditStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">View Status: </font>
-        <font id="firestoreViewStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
+  <section>
+    <h2>Live Output</h2>
+    <div id="log"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="dl" class="btn-ghost">⬇ Download JSON report</button>
     </div>
+  </section>
+</main>
 
-    <hr/>
-    <div>
-        <font style="font-weight: bolder;font-size: 1.5rem">Firebase Realtime Database:</font>
-        <br/>
-        <font style="font-size: 1.2rem">Write Permission: </font>
-        <font id="dbEditStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <font style="font-size: 1.2rem">Read Permission: </font>
-        <font id="dbViewStatus" style="font-weight: bolder;font-size: 1rem">N/A</font>
-        <br/>
-        <textarea cols="100" rows="4" disabled style="overflow:auto;resize:none" id="dbValue"></textarea>
-    </div>
-</div>
+<footer>
+  Use only against projects you own or are authorized to test. Browser mode has CORS limitations — RTDB/Storage/Functions probes may fail without a real terminal.
+</footer>
+
+<!-- Pyodide -->
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
 
 <script>
-    function run() {
-        const projectId = document.getElementById("projectId").value;
-        const apiKey = document.getElementById("apiKey").value;
-        window.location.href = `${window.location.protocol}//${window.location.hostname}${window.location.pathname}?projectId=${projectId}&apiKey=${apiKey}`;
-    }
+// ------------------------------------------------------------------ UI helpers
+const $ = id => document.getElementById(id);
+const log = (html) => { const d = $("log"); d.insertAdjacentHTML("beforeend", html + "\n"); d.scrollTop = d.scrollHeight; };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let pyodideReady = null;
+const summaryCounts = {CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0};
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const projectId = urlParams.get("projectId");
-    const apiKey = urlParams.get("apiKey");
+function updateSummary(){
+  const parts = ["CRITICAL","HIGH","MEDIUM","LOW","INFO"]
+      .filter(k => summaryCounts[k] > 0)
+      .map(k => `<span class="pill"><span class="sev ${k}">${k}</span>${summaryCounts[k]}</span>`);
+  $("summary").innerHTML = parts.length ? parts.join("") : `<span class="dim">No findings from probes. Manually review rules/custom claims.</span>`;
+}
+function setProgress(p){ $("progress").firstElementChild.style.width = Math.round(p*100)+"%"; }
 
-    document.getElementById("projectId").value = projectId;
-    document.getElementById("apiKey").value = apiKey;
+// ------------------------------------------------------------------ Pyodide boot
+async function boot(){
+  log(`<span class="info">[*] Loading Pyodide (CPython in browser)…</span>`);
+  pyodideReady = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/" });
+  log(`<span class="info">[*] Loading micropip + pyodide-http…</span>`);
+  await pyodideReady.loadPackage("micropip");
+  await pyodideReady.runPythonAsync(`
+import micropip, sys
+await micropip.install("pyodide-http")
+import pyodide_http; pyodide_http.patch_all()   # makes requests work over fetch()
+await micropip.install("pyjwt")
+import requests, jwt
+`);
 
-    const firebaseConfig = {
-        apiKey: apiKey,
-        authDomain: `${projectId}.firebaseapp.com`,
-        databaseURL: `https://${projectId}.firebaseio.com`,
-        projectId: projectId,
-        storageBucket: `${projectId}.appspot.com`,
-        appId: "111",
-        measurementId: "111222"
-    };
+  // Bridge: python prints & findings are routed to JS
+  await pyodideReady.runPythonAsync(`
+import builtins, json, sys
+def _emit_py(html): import js; js.__emit(html)
+class _P:
+    def write(self,s):
+        if not s: return 0
+        import js
+        for line in s.splitlines():
+            js.__emit(js.__esc(line))
+        return len(s)
+    def flush(self): pass
+sys.stdout = _P(); sys.stderr = _P()
 
-    document.getElementById("configValue").value = JSON.stringify(firebaseConfig, null, 2);
+FINDINGS = []
+def finding(sev,title,detail):
+    import js
+    FINDINGS.append({"severity":sev,"title":title,"detail":detail})
+    js.__finding(sev,title,detail)
+`);
 
-    const app = firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const storage = firebase.storage();
-    const firestore = firebase.firestore();
-    const database = firebase.database();
+  // Register JS bridge functions
+  pyodideReady.globals.set("__emit", (h) => log(h));
+  // expose esc via a small shim
+  await pyodideReady.runPythonAsync(`
+import js
+_esc = js.__esc
+class _JS:
+    @staticmethod
+    def __emit(x): js.__emit(x)
+    @staticmethod
+    def __esc(x):  return _esc(x)
+js_ = _JS
+`);
+  log(`<span class="ok">[+] Ready.</span>`);
+}
 
-    function displayError(elementId, error) {
-        let errorMessage = error.message || JSON.stringify(error);
-        if (error.details) {
-            errorMessage = error.details.map(detail => detail.message).join(", ");
-        }
-        document.getElementById(elementId).innerHTML = `<font color="green">Not Vulnerable!!! Error: ${errorMessage}</font>`;
-    }
+// expose helpers to pyodide
+window.__emit = (html) => log(html);
+window.__finding = (sev,title,detail) => {
+  summaryCounts[sev] = (summaryCounts[sev]||0)+1; updateSummary();
+  // python already pushed a full colored line; no need to double print
+};
+window.__esc = esc;
+window.__setProgress = setProgress;
 
-    async function testAnonymousLogin() {
-        try {
-            const result = await auth.signInAnonymously();
-            document.getElementById("anonymousStatus").innerHTML = '<font color="red">BUG!!! Token: ' + result.user.uid + '</font>';
-        } catch (error) {
-            displayError("anonymousStatus", error);
-        }
-    }
+// ------------------------------------------------------------------ enable run
+$("authz").addEventListener("change", () => { $("run").disabled = !$("authz").checked; });
+$("stop").addEventListener("click", () => { $("log").innerHTML = ""; for (const k in summaryCounts) summaryCounts[k]=0; updateSummary(); setProgress(0); });
 
-    async function testEmailLinkLogin() {
-        try {
-            await auth.sendSignInLinkToEmail("test@example.com", { url: firebaseConfig.authDomain, handleCodeInApp: true });
-            document.getElementById("linkToEmailStatus").innerHTML = '<font color="red">BUG!!!</font>';
-        } catch (error) {
-            displayError("linkToEmailStatus", error);
-        }
-    }
+// ------------------------------------------------------------------ the Python auditor (same engine as your .py, adapted for browser)
+const PY_AUDITOR = String.raw`
+import json, time, uuid, urllib.parse, os
+import requests, jwt
+S = requests.Session()
+S.headers["User-Agent"] = "Firebase-Audit-Browser/1.0"
+TIMEOUT = 15
 
-    async function testCreateAccount() {
-        try {
-            const result = await auth.createUserWithEmailAndPassword("test@example.com", "password123");
-            document.getElementById("createAccountStatus").innerHTML = '<font color="red">BUG!!! User: ' + result.user.uid + '</font>';
-        } catch (error) {
-            displayError("createAccountStatus", error);
-        }
-    }
+def c(s,cls="dim"): return f'<span class="{cls}">{s}</span>'
+def banner(t):
+    print()
+    print(c("="*66,"dim"))
+    print(c("  "+t,"info"))
+    print(c("="*66,"dim"))
+def ok(t):   print(c("[+] ","ok")+t)
+def bad(t):  print(c("[!] ","bad")+t)
+def info(t): print(c("[*] ","info")+t)
+def warn(t): print(c("[~] ","warn")+t)
 
-    async function testCustomTokenLogin() {
-        try {
-            const result = await auth.signInWithCustomToken("custom-token");
-            document.getElementById("tokenStatus").innerHTML = '<font color="red">BUG!!! Token: ' + result.user.uid + '</font>';
-        } catch (error) {
-            displayError("tokenStatus", error);
-        }
-    }
+class AuthMgr:
+    def __init__(self, apikey):
+        self.apikey=apikey; self.id_token=None; self.refresh_token=None
+        self.local_id=None; self.email=None; self.claims=None
+    def _store(self,j):
+        self.id_token=j.get("idToken") or self.id_token
+        self.refresh_token=j.get("refreshToken") or self.refresh_token
+        self.local_id=j.get("localId") or self.local_id
+        self.email=j.get("email") or self.email
+        if self.id_token:
+            try: self.claims=jwt.decode(self.id_token,options={"verify_signature":False})
+            except Exception: self.claims=None
+    def signup_anon(self):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={self.apikey}"
+        r=S.post(url,json={"returnSecureToken":True},timeout=TIMEOUT)
+        j=r.json()
+        if r.ok and "idToken" in j:
+            self._store(j); ok("Anonymous auth ENABLED")
+            finding("HIGH","Anonymous auth enabled","Anyone can obtain an ID token.")
+            return True
+        bad(f"Anonymous auth disabled ({(j.get('error') or {}).get('message')})")
+        return False
+    def signup_email(self,email,pwd):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={self.apikey}"
+        r=S.post(url,json={"email":email,"password":pwd,"returnSecureToken":True},timeout=TIMEOUT)
+        j=r.json()
+        if r.ok and "idToken" in j:
+            self._store(j); ok(f"Signup OPEN for {email}")
+            finding("MEDIUM","Open email signup",email); return True
+        bad(f"Signup blocked: {(j.get('error') or {}).get('message')}"); return False
+    def login_email(self,email,pwd):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={self.apikey}"
+        r=S.post(url,json={"email":email,"password":pwd,"returnSecureToken":True},timeout=TIMEOUT)
+        j=r.json()
+        if r.ok and "idToken" in j:
+            self._store(j); ok(f"Login OK for {email}"); return True
+        bad(f"Login failed: {(j.get('error') or {}).get('message')}"); return False
+    def enumerate_providers(self):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key={self.apikey}"
+        r=S.post(url,json={"identifier":"probe@example.invalid","continueUri":"http://localhost"},timeout=TIMEOUT)
+        try: j=r.json()
+        except Exception: return
+        if j.get("signinMethods"):
+            warn(f"Provider enumeration probed: {j['signinMethods']}")
+    def oob_enum(self,emails):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={self.apikey}"
+        for e in emails:
+            try:
+                r=S.post(url,json={"requestType":"PASSWORD_RESET","email":e},timeout=TIMEOUT)
+                msg=(r.json().get("error") or {}).get("message","")
+                if r.ok: warn(f"OOB sent to {e} (account exists likely)")
+                elif "EMAIL_NOT_FOUND" in msg: info(f"{e}: not found")
+                elif "TOO_MANY_ATTEMPTS" in msg: warn(f"{e}: rate-limited (exists?)")
+                else: info(f"{e}: {msg}")
+            except Exception as ex: info(f"{e}: {ex}")
+    def token_fresh(self):
+        if not self.refresh_token: return
+        url=f"https://securetoken.googleapis.com/v1/token?key={self.apikey}"
+        r=S.post(url,data={"grant_type":"refresh_token","refresh_token":self.refresh_token},timeout=TIMEOUT)
+        if r.ok: self._store(r.json()); ok("Refresh-token exchange OK")
 
-    async function testNormalLogin() {
-        try {
-            const result = await auth.signInWithEmailAndPassword("test@example.com", "password123");
-            document.getElementById("normalLoginStatus").innerHTML = '<font color="red">BUG!!! User: ' + result.user.uid + '</font>';
-        } catch (error) {
-            displayError("normalLoginStatus", error);
-        }
-    }
+class IdP:
+    def __init__(self,apikey): self.apikey=apikey
+    def lookup(self,id_token):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={self.apikey}"
+        r=S.post(url,json={"idToken":id_token},timeout=TIMEOUT)
+        if r.ok:
+            users=r.json().get("users",[{}]); u=users[0] if users else {}
+            provs=[p.get("providerId") for p in u.get("providerUserInfo",[])]
+            ok(f"accounts:lookup providers={provs} verified={u.get('emailVerified')} disabled={u.get('disabled')}")
+            ca=u.get("customAttributes")
+            if ca:
+                warn(f"Custom claims: {ca}")
+                finding("MEDIUM","Custom claims on token",ca)
+            return u
+        return None
+    def continue_url_probe(self):
+        url=f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={self.apikey}"
+        for cu in ["https://evil.example/","//evil.example/","https://evil.example\\@firebaseapp.com/"]:
+            r=S.post(url,json={"requestType":"PASSWORD_RESET","email":"probe@example.invalid",
+                               "continueUrl":cu},timeout=TIMEOUT)
+            if r.ok: warn(f"continueUrl accepted: {cu}")
+            else:
+                msg=(r.json().get("error") or {}).get("message","")
+                if "INVALID_CONTINUE_URI" in msg or "UNAUTHORIZED_CONTINUE_URI" in msg:
+                    info(f"continueUrl blocklisted correctly ({cu})")
+                else: info(f"continueUrl -> {msg}")
 
-    async function testStorageUpload() {
-        const fileRef = storage.ref().child("test.txt");
-        try {
-            await fileRef.put(new Blob(["Hello, world!"], { type: "text/plain" }));
-            document.getElementById("storageEditStatus").innerHTML = '<font color="red">BUG!!! File uploaded</font>';
-        } catch (error) {
-            displayError("storageEditStatus", error);
-        }
-    }
+class Firestore:
+    def __init__(self,project,apikey,auth):
+        self.project=project; self.apikey=apikey; self.auth=auth
+        self.base=f"https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents"
+    def _h(self):
+        return {"Authorization":f"Bearer {self.auth.id_token}"} if self.auth.id_token else {}
+    def list_collections(self,path=""):
+        url=f"{self.base}/{path}".rstrip("/")+f"?key={self.apikey}"
+        try: r=S.get(url,headers=self._h(),timeout=TIMEOUT)
+        except Exception as ex:
+            info(f"LIST {path or '/'} -> browser/CORS error: {type(ex).__name__}"); return None
+        if r.status_code==200:
+            j=r.json(); ids=[d["name"].split("/")[-1] for d in j.get("document",[])]
+            ok(f"LIST {path or '/'}: {len(ids)} docs")
+            if ids and not self.auth.id_token:
+                finding("CRITICAL","Unauthenticated Firestore read",f"{path or '/'}")
+            return j
+        if r.status_code in (401,403):
+            info(f"LIST {path or '/'} denied ({r.status_code})")
+        elif r.status_code==0: info(f"LIST {path or '/'} CORS/network blocked")
+        return None
+    def write_doc(self,docpath,fields):
+        url=f"{self.base}/{docpath}?key={self.apikey}"
+        body={"fields":{k:({"stringValue":v} if isinstance(v,str) else
+                            {"integerValue":v} if isinstance(v,int) else
+                            {"booleanValue":v}) for k,v in fields.items()}}
+        try: r=S.patch(url,headers=self._h(),json=body,timeout=TIMEOUT)
+        except Exception as ex: info(f"WRITE {docpath} CORS/network: {type(ex).__name__}"); return False
+        if r.status_code==200:
+            ok(f"WRITE accepted {docpath} fields={list(fields)}")
+            finding("HIGH","Firestore write accepted",docpath); return True
+        info(f"WRITE {docpath} -> {r.status_code}"); return False
+    def query(self,collection,limit=5):
+        url=f"{self.base}:runQuery?key={self.apikey}"
+        body={"structuredQuery":{"from":[{"collectionId":collection}],"limit":limit}}
+        try: r=S.post(url,headers=self._h(),json=body,timeout=TIMEOUT)
+        except Exception: return None
+        if r.status_code==200:
+            ok(f"runQuery allowed on {collection}");
+            finding("HIGH","Firestore query allowed",collection)
+            return r.json()
+        return None
 
-    async function testStorageList() {
-        try {
-            const result = await storage.ref().listAll();
-            document.getElementById("storageViewStatus").innerHTML = '<font color="red">BUG!!! Files listed</font>';
-        } catch (error) {
-            displayError("storageViewStatus", error);
-        }
-    }
+class RTDB:
+    def __init__(self,url,apikey,auth): self.url=url.rstrip("/"); self.apikey=apikey; self.auth=auth
+    def _u(self,path):
+        q="?auth="+urllib.parse.quote(self.auth.id_token) if self.auth.id_token else "?"
+        return f"{self.url}/{path}.json{q}"
+    def shallow(self):
+        try: r=S.get(self._u("")+"&shallow=true" if "auth=" in self._u("") else self._u("")+"shallow=true",timeout=TIMEOUT)
+        except Exception as ex: info(f"RTDB shallow -> CORS/network: {type(ex).__name__}"); return None
+        if r.ok: ok(f"RTDB shallow root read"); return r.json() if r.text else None
+        info(f"RTDB shallow denied ({r.status_code})"); return None
+    def write(self,path,val):
+        try: r=S.put(self._u(path),data=json.dumps(val),timeout=TIMEOUT)
+        except Exception: return False
+        if r.ok: ok(f"RTDB write {path}"); finding("HIGH","RTDB write accepted",path); return True
+        return False
 
-    async function testFirestoreWrite() {
-        try {
-            await firestore.collection("test").doc("testuser").set({ name: "Test User" });
-            document.getElementById("firestoreEditStatus").innerHTML = '<font color="red">BUG!!! Document written</font>';
-        } catch (error) {
-            displayError("firestoreEditStatus", error);
-        }
-    }
+class Storage:
+    def __init__(self,bucket,apikey,auth):
+        self.bucket=bucket; self.apikey=apikey; self.auth=auth
+        self.base=f"https://firebasestorage.googleapis.com/v0/b/{bucket}/o"
+    def list(self,prefix=""):
+        url=f"{self.base}?key={self.apikey}&prefix={urllib.parse.quote(prefix)}"
+        h={"Authorization":f"Bearer {self.auth.id_token}"} if self.auth.id_token else {}
+        try: r=S.get(url,headers=h,timeout=TIMEOUT)
+        except Exception as ex: info(f"Storage list CORS/network: {type(ex).__name__}"); return []
+        if r.ok:
+            j=r.json(); items=j.get("items",[])
+            ok(f"Storage prefix='{prefix}': {len(items)} items")
+            if items and not self.auth.id_token:
+                finding("CRITICAL","Unauthenticated Storage list",self.bucket)
+            return items
+        info(f"Storage list {prefix} -> {r.status_code}"); return []
 
-    async function testFirestoreRead() {
-        try {
-            const doc = await firestore.collection("test").doc("testuser").get();
-            document.getElementById("firestoreViewStatus").innerHTML = '<font color="red">BUG!!! Document read</font>';
-        } catch (error) {
-            displayError("firestoreViewStatus", error);
-        }
-    }
+def main(project,apikey,bucket,rtdb_url,email,password,enum_emails,no_write):
+    banner("0. Identity & API key")
+    auth=AuthMgr(apikey)
+    auth.signup_anon()
+    if email and password:
+        if not auth.signup_email(email,password):
+            auth.login_email(email,password)
+    idp=IdP(apikey)
+    if auth.id_token:
+        idp.lookup(auth.id_token)
+        if auth.claims:
+            for k in ("aud","iss","exp","iat","auth_time","email_verified","firebase"):
+                if k in auth.claims: info(f"claim {k} = {auth.claims[k]}")
+    idp.continue_url_probe()
 
-    async function testDatabaseWrite() {
-        try {
-            await database.ref("test").set({ name: "Test User" });
-            document.getElementById("dbEditStatus").innerHTML = '<font color="red">BUG!!! Data written</font>';
-        } catch (error) {
-            displayError("dbEditStatus", error);
-        }
-    }
+    banner("1. Auth surface")
+    auth.enumerate_providers()
+    if enum_emails: auth.oob_enum(enum_emails)
+    auth.token_fresh()
 
-    async function testDatabaseRead() {
-        try {
-            const snapshot = await database.ref("test").once("value");
-            document.getElementById("dbViewStatus").innerHTML = '<font color="red">BUG!!! Data read</font>';
-            document.getElementById("dbValue").value = JSON.stringify(snapshot.val(), null, 2);
-        } catch (error) {
-            displayError("dbViewStatus", error);
-        }
-    }
+    banner("2. Firestore")
+    fs=Firestore(project,apikey,auth)
+    fs.list_collections("")
+    for col in ["users","accounts","profiles","admin","orders","chats","messages","posts","config","settings"]:
+        fs.list_collections(col)
+        fs.query(col)
+    if not no_write:
+        pd=f"users/fbaudit_{uuid.uuid4().hex[:8]}"
+        fs.write_doc(pd,{"probe":"fbaudit"})
+        fs.write_doc(pd,{"isAdmin":True,"role":"admin","balance":999999,
+                          "emailVerified":True,"owner":auth.local_id or "x"})
 
-    async function runTests() {
-        await testAnonymousLogin();
-        await testEmailLinkLogin();
-        await testCreateAccount();
-        await testCustomTokenLogin();
-        await testNormalLogin();
-        await testStorageUpload();
-        await testStorageList();
-        await testFirestoreWrite();
-        await testFirestoreRead();
-        await testDatabaseWrite();
-        await testDatabaseRead();
-    }
+    banner("3. Realtime Database (CORS-limited in browser)")
+    if rtdb_url:
+        rtdb=RTDB(rtdb_url,apikey,auth)
+        rtdb.shallow()
+        if not no_write:
+            rtdb.write(f"fbaudit_{uuid.uuid4().hex[:6]}",{"probe":"fbaudit"})
+    else: info("Skipped (no RTDB URL provided)")
 
-    runTests();
+    banner("4. Cloud Storage")
+    st=Storage(bucket,apikey,auth)
+    st.list("")
+    for p in ["uploads/","public/","users/","profile/","avatars/"]: st.list(p)
+
+    banner("5. Hosting client config leak")
+    for u in [f"https://{project}.web.app/__/firebase/init.js",
+              f"https://{project}.firebaseapp.com/__/firebase/init.js"]:
+        try:
+            r=S.get(u,timeout=TIMEOUT)
+            if r.ok:
+                ok(f"init.js reachable: {u}")
+                if any(x in r.text for x in ["projects/","secret","password","private_key"]):
+                    warn("init.js contains suspicious strings — inspect manually")
+                finding("INFO","Firebase client config reachable",u)
+            else: info(f"{u} -> {r.status_code}")
+        except Exception as ex: info(f"{u} -> {type(ex).__name__}")
+
+    banner("6. App Check spot-check")
+    url=f"https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents?key={apikey}"
+    try:
+        r=S.get(url,headers={"Authorization":f"Bearer {auth.id_token}"} if auth.id_token else {},timeout=TIMEOUT)
+        if r.status_code==200:
+            warn("Firestore reachable WITHOUT App Check header — App Check likely not enforced")
+        elif r.status_code==403 and "APP_CHECK" in r.text.upper():
+            ok("App Check appears enforced on Firestore")
+        else: info(f"App Check probe -> {r.status_code}")
+    except Exception as ex: info(f"App Check probe CORS/network: {type(ex).__name__}")
+
+    banner("SUMMARY")
+    tally={}
+    for f in FINDINGS: tally[f["severity"]]=tally.get(f["severity"],0)+1
+    for k in ("CRITICAL","HIGH","MEDIUM","LOW","INFO"):
+        if k in tally: print(c(f"  {k:<9}","dim")+": "+str(tally[k]))
+    if not FINDINGS: print(c("  No findings. Manually review security rules & claims.","dim"))
+    return {"project":project,"findings":FINDINGS}
+
+# read args from JS globals
+import js
+project=js.document.getElementById("project").value.strip()
+apikey=js.document.getElementById("apikey").value.strip()
+bucket=js.document.getElementById("bucket").value.strip() or f"{project}.appspot.com"
+rtdb_url=js.document.getElementById("rtdb").value.strip()
+email=js.document.getElementById("email").value.strip()
+password=js.document.getElementById("password").value
+enum_emails=[x.strip() for x in js.document.getElementById("enumEmails").value.split(",") if x.strip()]
+no_write=bool(js.document.getElementById("noWrite").checked)
+
+js.__setProgress(0.1)
+report=main(project,apikey,bucket,rtdb_url,email,password,enum_emails,no_write)
+js.__setProgress(1.0)
+js.__report = report  # for download
+`;
+
+$("run").addEventListener("click", async () => {
+  if (!$("authz").checked) { alert("You must confirm authorization first."); return; }
+  const project = $("project").value.trim();
+  const apikey = $("apikey").value.trim();
+  if (!project || !apikey) { alert("Project ID and API Key are required."); return; }
+  $("run").disabled = true;
+  try {
+    if (!pyodideReady) await boot();
+    log(`<span class="info">[*] Running audit against <b>${esc(project)}</b>…</span>`);
+    await pyodideReady.runPythonAsync(PY_AUDITOR);
+    log(`<span class="ok">[+] Audit complete. Click “Download JSON report” for the full artifact.</span>`);
+  } catch (e) {
+    log(`<span class="bad">[!] Error: ${esc(e.message || e)}</span>`);
+    console.error(e);
+  } finally {
+    $("run").disabled = !$("authz").checked;
+  }
+});
+
+$("dl").addEventListener("click", () => {
+  const r = window.__report;
+  if (!r) { alert("Run an audit first."); return; }
+  const blob = new Blob([JSON.stringify(r, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `firebase_audit_${r.project}_${Date.now()}.json`;
+  a.click();
+});
 </script>
 </body>
 </html>
