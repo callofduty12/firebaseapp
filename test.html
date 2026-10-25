@@ -268,7 +268,7 @@ async function tryEmailLogin(email, pwd) {
 }
 async function tryEmailLink() {
     try {
-        await auth.sendSignInLinkToEmail("test@gmail.com", {
+        await auth.sendSignInLinkToEmail("test@example.com", {
             url: window.location.href.split("?")[0],
             handleCodeInApp: true
         });
@@ -291,7 +291,7 @@ async function providerEnumeration() {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({identifier:"probe@gmail.com", continueUri:"http://localhost"})
+        body: JSON.stringify({identifier:"probe@example.invalid", continueUri:"http://localhost"})
     });
     if (r.ok && r.body) {
         const m = r.body.signinMethods || [];
@@ -302,7 +302,7 @@ async function providerEnumeration() {
 }
 async function oobEnum() {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${cfg.apiKey}`;
-    const targets = ["admin@gmail.com", "test@gmail.com", "info@gmail.com"];
+    const targets = ["admin@example.com", "test@example.com", "info@example.com"];
     const lines = [];
     for (const e of targets) {
         const r = await fetchJson(url, {
@@ -324,7 +324,7 @@ async function continueUrlProbe() {
     for (const cu of probes) {
         const r = await fetchJson(url, {
             method:"POST", headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({requestType:"PASSWORD_RESET", email:"probe@gmail.com", continueUrl: cu})
+            body: JSON.stringify({requestType:"PASSWORD_RESET", email:"probe@example.invalid", continueUrl: cu})
         });
         if (r.ok) {
             notes.push("ACCEPTED " + cu);
@@ -651,7 +651,7 @@ async function apiKeyRestrictionProbe() {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {
         method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({identifier: "probe@gmail.com", continueUri: "http://localhost"})
+        body: JSON.stringify({identifier: "probe@example.invalid", continueUri: "http://localhost"})
     });
     if (r.status === 0) { setStatus("keyRestrictStatus", "CORS-blocked", "info"); return; }
     if (r.status === 403 && /referer|referrer|API_KEY_HTTP_REFERRER_BLOCKED|requests-from-referer/i.test(r.text)) {
@@ -669,7 +669,7 @@ async function loginEnumOracle() {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {
         method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({email: "probe_" + Date.now() + "@gmail.com", password: "x", returnSecureToken: true})
+        body: JSON.stringify({email: "probe_" + Date.now() + "@example.invalid", password: "x", returnSecureToken: true})
     });
     const msg = (r.body && r.body.error && r.body.error.message) || "";
     if (r.status === 0) { setStatus("loginEnumStatus", "CORS-blocked", "info"); return; }
@@ -690,7 +690,7 @@ async function passwordPolicyProbe() {
     const url = `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {
         method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({email: "pwtest_" + Date.now() + "@gmail.com", password: "123456", returnSecureToken: true})
+        body: JSON.stringify({email: "pwtest_" + Date.now() + "@example.invalid", password: "123456", returnSecureToken: true})
     });
     const msg = (r.body && r.body.error && r.body.error.message) || "";
     if (r.status === 0) { setStatus("pwPolicyStatus", "CORS-blocked", "info"); return; }
@@ -1015,7 +1015,7 @@ const V3 = () => `https://www.googleapis.com/identitytoolkit/v3/relyingparty`;
 async function v3EnumBypass() {
     const url = `${V3()}/verifyPassword?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({email: "probe_" + Date.now() + "@gmail.com", password: "x", returnSecureToken: true})});
+        body: JSON.stringify({email: "probe_" + Date.now() + "@example.invalid", password: "x", returnSecureToken: true})});
     const msg = (r.body && r.body.error && r.body.error.message) || "";
     if (r.status === 0) { setStatus("v3EnumStatus", "CORS-blocked", "info"); return; }
     if (/EMAIL_NOT_FOUND|INVALID_PASSWORD/.test(msg)) {
@@ -1033,7 +1033,7 @@ async function v3EnumBypass() {
 // account info is enumerable unauthenticated.
 async function v3AccountInfoEnum() {
     const url = `${V3()}/getAccountInfo?key=${cfg.apiKey}`;
-    const targets = ["admin@gmail.com", "test@gmail.com", "support@gmail.com"];
+    const targets = ["admin@example.com", "test@example.com", "support@example.com"];
     const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({email: targets})});
     if (r.status === 0) { setStatus("v3InfoStatus", "CORS-blocked", "info"); return; }
@@ -1053,7 +1053,7 @@ async function v3AccountInfoEnum() {
 // created without the attacker owning the email.
 async function v3SignupVerifiedBypass() {
     if (READ_ONLY) { setStatus("v3VerifiedStatus", "skipped (read-only)", "info"); return; }
-    const email = "verif_" + Date.now() + "@gmail.com";
+    const email = "verif_" + Date.now() + "@example.invalid";
     const url = `${V3()}/signupNewUser?key=${cfg.apiKey}`;
     const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({email, password: "Str0ngP@ss!" + Date.now(), emailVerified: true, returnSecureToken: true})});
@@ -1191,7 +1191,7 @@ async function run(readOnly = false) {
         // No credentials entered: still test whether open signup is allowed, using a throwaway
         // address (email login genuinely needs real credentials, so that row is marked skipped).
         if (!READ_ONLY) {
-            await tryEmailSignup("fbaudit_" + Date.now() + "@gmail.com", "Str0ngP@ss!" + Date.now());
+            await tryEmailSignup("fbaudit_" + Date.now() + "@example.invalid", "Str0ngP@ss!" + Date.now());
         } else {
             setStatus("createAccountStatus", "skipped (read-only; no credentials)", "info");
         }
