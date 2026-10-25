@@ -1,5 +1,7 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
+    <meta charset="utf-8"/>
     <title>Firebase Security Auditor (Browser)</title>
     <style>
         body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; background:#fafafa; }
@@ -316,7 +318,8 @@ async function firestoreListRoot() {
     const url = `${FS_BASE()}?key=${cfg.apiKey}&pageSize=20`;
     const r = await fetchJson(url, {headers: authHeaders()});
     if (r.ok) {
-        const docs = (r.body.document || []).map(d => d.name.split("/").pop());
+        // FIX: Firestore list response field is "documents" (was "document")
+        const docs = (r.body.documents || []).map(d => d.name.split("/").pop());
         setStatus("fsListStatus", `Listed ${docs.length} doc(s) from root`, "bad");
         document.getElementById("fsListValue").value = JSON.stringify(r.body, null, 2);
         if (!idToken) finding("CRITICAL", "Unauthenticated Firestore read", "Root collection list readable with only apiKey.");
@@ -424,7 +427,8 @@ async function rtdbWriteTest() {
 const ST_BASE = () => `https://firebasestorage.googleapis.com/v0/b/${cfg.storageBucket}/o`;
 
 async function storageList() {
-    const url = `${ST_BASE()}?key=${cfg.apiKey}&pageSize=20`;
+    // FIX: Storage list API uses maxResults, not pageSize
+    const url = `${ST_BASE()}?key=${cfg.apiKey}&maxResults=20`;
     const r = await fetchJson(url, {headers: authHeaders()});
     if (r.ok) {
         const items = r.body.items || [];
@@ -459,7 +463,10 @@ async function storageUploadTest() {
 }
 async function storageUploadXss() {
     if (READ_ONLY) { setStatus("storageXssStatus", "skipped (read-only)", "info"); return; }
-    const html = `<script>parent.postMessage(document.cookie,'*')</script>`;
+    // FIX: the literal "</script>" below was closing this inline <script> block and
+    // breaking the whole file. Escaping the slash as <\/script> keeps the HTML parser
+    // from treating it as a closing tag while leaving the JS string value identical.
+    const html = `<script>parent.postMessage(document.cookie,'*')<\/script>`;
     const r = await storageUpload("fbaudit_xss.html", html, "text/html");
     if (r.ok) {
         setStatus("storageXssStatus", "UPLOAD ACCEPTED — check if served same-origin", "warn");
@@ -524,8 +531,11 @@ async function initJsProbe() {
 }
 
 /* ============================ ORCHESTRATOR ============================ */
-async function run() {
-    READ_ONLY = false;
+// FIX: run() previously reset READ_ONLY = false unconditionally, so the
+// "Read-Only Mode" button had no effect (it always performed writes).
+// The mode is now passed in as an argument.
+async function run(readOnly = false) {
+    READ_ONLY = readOnly;
     FINDINGS = [];
     document.getElementById("summary").innerHTML = "";
     buildConfig();
@@ -593,8 +603,7 @@ async function run() {
 }
 
 async function runReadOnly() {
-    READ_ONLY = true;
-    await run();
+    await run(true);
 }
 
 /* ============================ REPORT ============================ */
