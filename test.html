@@ -28,6 +28,11 @@
 
 <h2>Firebase Security Auditor</h2>
 <p style="color:#b26a00"><b>Only run against projects you own or are explicitly authorized to test.</b></p>
+<p style="color:#555;font-size:13px;max-width:900px">
+Note: Auth, Firestore, RTDB and Storage checks work from the browser. The <b>Cloud Functions</b>
+and <b>Hosting init.js</b> checks cannot run from a web page — browsers block those cross-origin
+requests (CORS). For a complete audit including those, use the companion Python script.
+</p>
 
 <div class="row">
     <label>ProjectID:</label>
@@ -313,22 +318,33 @@ async function lookupAndClaims() {
 
 /* ============================ 2. FIRESTORE ============================ */
 const FS_BASE = () => `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents`;
+const FS_COMMON_COLLECTIONS = ["users","accounts","profiles","admin","orders",
+    "chats","messages","posts","config","settings"];
 
 async function firestoreListRoot() {
-    const url = `${FS_BASE()}?key=${cfg.apiKey}&pageSize=20`;
-    const r = await fetchJson(url, {headers: authHeaders()});
-    if (r.ok) {
-        // FIX: Firestore list response field is "documents" (was "document")
-        const docs = (r.body.documents || []).map(d => d.name.split("/").pop());
-        setStatus("fsListStatus", `Listed ${docs.length} doc(s) from root`, "bad");
-        document.getElementById("fsListValue").value = JSON.stringify(r.body, null, 2);
-        if (!idToken) finding("CRITICAL", "Unauthenticated Firestore read", "Root collection list readable with only apiKey.");
-        else finding("HIGH", "Firestore root listable with auth", "Check rules for over-permissive read.");
-    } else if (r.status === 403) {
-        setStatus("fsListStatus", "Denied (403) — rules probably OK", "ok");
-    } else {
-        setStatus("fsListStatus", "HTTP " + r.status, "warn");
+    // Enumerate common collection names (parity with the Python version), since
+    // Firestore has no unauthenticated "list all root collections" over REST.
+    const lines = [];
+    let anyReadable = false;
+    for (const col of FS_COMMON_COLLECTIONS) {
+        const url = `${FS_BASE()}/${col}?key=${cfg.apiKey}&pageSize=20`;
+        const r = await fetchJson(url, {headers: authHeaders()});
+        if (r.ok) {
+            const docs = (r.body.documents || []);  // FIX: field is "documents"
+            lines.push(`${col}: ${docs.length} doc(s)`);
+            if (docs.length) {
+                anyReadable = true;
+                if (!idToken) finding("CRITICAL", "Unauthenticated Firestore read", `${col} readable with only apiKey (${docs.length} docs).`);
+                else finding("HIGH", "Firestore collection listable with auth", `${col} (${docs.length} docs) — check rules.`);
+            }
+        } else if (r.status === 403) {
+            lines.push(`${col}: denied (403)`);
+        } else {
+            lines.push(`${col}: HTTP ${r.status}`);
+        }
     }
+    setStatus("fsListStatus", anyReadable ? "Readable collections found — see box" : "No common collection readable", anyReadable ? "bad" : "ok");
+    document.getElementById("fsListValue").value = lines.join("\n");
 }
 async function firestoreReadTest() {
     const url = `${FS_BASE()}/users/testuser?key=${cfg.apiKey}`;
@@ -426,19 +442,32 @@ async function rtdbWriteTest() {
 /* ============================ 4. STORAGE ============================ */
 const ST_BASE = () => `https://firebasestorage.googleapis.com/v0/b/${cfg.storageBucket}/o`;
 
+const ST_PREFIXES = ["", "uploads/", "public/", "users/", "profile/", "avatars/"];
+
 async function storageList() {
-    // FIX: Storage list API uses maxResults, not pageSize
-    const url = `${ST_BASE()}?key=${cfg.apiKey}&maxResults=20`;
-    const r = await fetchJson(url, {headers: authHeaders()});
-    if (r.ok) {
-        const items = r.body.items || [];
-        setStatus("storageViewStatus", `LISTED ${items.length} item(s)`, "bad");
-        if (!idToken && items.length) finding("CRITICAL", "Unauthenticated Storage list", `bucket ${cfg.storageBucket}`);
-    } else if (r.status === 412) {
-        setStatus("storageViewStatus", "Requires App Check / not enabled", "info");
-    } else {
-        setStatus("storageViewStatus", "Blocked (" + r.status + ")", "ok");
+    // Iterate common prefixes (parity with the Python version).
+    const lines = [];
+    let anyListed = false, reported = false;
+    for (const prefix of ST_PREFIXES) {
+        const url = `${ST_BASE()}?key=${cfg.apiKey}&maxResults=50&prefix=${encodeURIComponent(prefix)}`;
+        const r = await fetchJson(url, {headers: authHeaders()});
+        if (r.ok) {
+            const items = r.body.items || [];
+            lines.push(`prefix='${prefix}': ${items.length} item(s)`);
+            if (items.length) {
+                anyListed = true;
+                if (!idToken && !reported) {
+                    finding("CRITICAL", "Unauthenticated Storage list", `bucket ${cfg.storageBucket} (prefix '${prefix}', ${items.length} items)`);
+                    reported = true;
+                }
+            }
+        } else if (r.status === 412) {
+            lines.push(`prefix='${prefix}': requires App Check / not enabled`);
+        } else {
+            lines.push(`prefix='${prefix}': blocked (${r.status})`);
+        }
     }
+    setStatus("storageViewStatus", anyListed ? "LISTED items — see findings" : "Nothing listable", anyListed ? "bad" : "ok");
 }
 async function storageUpload(name, content, ctype) {
     const boundary = "----fbaudit" + Math.random().toString(16).slice(2);
@@ -463,9 +492,10 @@ async function storageUploadTest() {
 }
 async function storageUploadXss() {
     if (READ_ONLY) { setStatus("storageXssStatus", "skipped (read-only)", "info"); return; }
-    // FIX: the literal "</script>" below was closing this inline <script> block and
-    // breaking the whole file. Escaping the slash as <\/script> keeps the HTML parser
-    // from treating it as a closing tag while leaving the JS string value identical.
+    // FIX: a literal closing script tag anywhere in this inline block (even in a
+    // string or a comment) ends the block and breaks the whole file. Writing the
+    // slash as <\/ keeps the HTML parser from matching it, while the JS string value
+    // is unchanged.
     const html = `<script>parent.postMessage(document.cookie,'*')<\/script>`;
     const r = await storageUpload("fbaudit_xss.html", html, "text/html");
     if (r.ok) {
@@ -483,6 +513,7 @@ async function probeFunctions() {
                    "submitForm","contact","notify","generatePdf","proxy"];
     const regions = ["us-central1","europe-west1","asia-east1","us-east1"];
     const found = [];
+    let corsBlocked = false;
     for (const name of names) {
         for (const region of regions) {
             const url = `https://${region}-${cfg.projectId}.cloudfunctions.net/${name}`;
@@ -496,12 +527,21 @@ async function probeFunctions() {
                     if (r.status === 200) finding("MEDIUM", "Public Cloud Function reachable", url);
                     break;
                 }
-            } catch(_) {}
+            } catch(_) { corsBlocked = true; }
         }
     }
-    document.getElementById("functionsValue").value = found.join("\n") || "(none responded)";
-    setStatus("functionsStatus", found.length ? `Found ${found.length} reachable function(s)` : "No common names responded",
-              found.length ? "bad" : "ok");
+    if (found.length) {
+        document.getElementById("functionsValue").value = found.join("\n");
+        setStatus("functionsStatus", `Found ${found.length} reachable function(s)`, "bad");
+    } else if (corsBlocked) {
+        document.getElementById("functionsValue").value =
+            "Cross-origin requests to *.cloudfunctions.net are blocked by the browser (CORS).\n" +
+            "This check cannot run from a web page — use the Python version (firetest.py) for Functions enumeration.";
+        setStatus("functionsStatus", "CORS-blocked in browser — use Python script", "info");
+    } else {
+        document.getElementById("functionsValue").value = "(none responded)";
+        setStatus("functionsStatus", "No common names responded", "ok");
+    }
 }
 
 /* ============================ 6. HOSTING ============================ */
@@ -511,6 +551,7 @@ async function initJsProbe() {
         `https://${cfg.projectId}.firebaseapp.com/__/firebase/init.js`
     ];
     const hits = [];
+    let corsBlocked = false;
     for (const u of urls) {
         try {
             const ctl = new AbortController();
@@ -525,9 +566,15 @@ async function initJsProbe() {
                 }
                 finding("INFO", "Firebase client config publicly reachable", u);
             }
-        } catch(_) {}
+        } catch(_) { corsBlocked = true; }
     }
-    setStatus("initJsStatus", hits.length ? "Reachable: " + hits.join(" , ") : "Not reachable", hits.length ? "warn" : "info");
+    if (hits.length) {
+        setStatus("initJsStatus", "Reachable: " + hits.join(" , "), "warn");
+    } else if (corsBlocked) {
+        setStatus("initJsStatus", "CORS-blocked in browser — use Python script to confirm", "info");
+    } else {
+        setStatus("initJsStatus", "Not reachable", "info");
+    }
 }
 
 /* ============================ ORCHESTRATOR ============================ */
