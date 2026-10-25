@@ -47,6 +47,12 @@ requests (CORS). For a complete audit including those, use the companion Python 
     <input id="rtdbUrl" type="text" placeholder="default: https://<project>-default-rtdb.firebaseio.com"/>
 </div>
 <div class="row">
+    <label>App ID (optional):</label>
+    <input id="appId" type="text" style="width:40%" placeholder="1:1234567890:web:abcdef123"/>
+    <label style="margin-left:20px">Measurement ID:</label>
+    <input id="measurementId" type="text" placeholder="G-XXXXXXX"/>
+</div>
+<div class="row">
     <label>Email (optional):</label>
     <input id="email" type="text"/>
     <label style="margin-left:20px">Password:</label>
@@ -122,6 +128,14 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">Public template fetch</span><span class="status info" id="remoteConfigStatus">N/A</span></div>
 <textarea id="remoteConfigValue" cols="100" rows="6" readonly></textarea>
 
+<h3>9. App ID attack surface</h3>
+<div class="row"><span class="label">webConfig leak (App ID → full config)</span><span class="status info" id="webConfigStatus">N/A</span></div>
+<div class="row"><span class="label">App Check debug-token bypass</span><span class="status info" id="appCheckDebugStatus">N/A</span></div>
+<div class="row"><span class="label">App Check provider config</span><span class="status info" id="appCheckProviderStatus">N/A</span></div>
+<div class="row"><span class="label">FCM registration open?</span><span class="status info" id="fcmStatus">N/A</span></div>
+<div class="row"><span class="label">Firebase ML custom models</span><span class="status info" id="firebaseMlStatus">N/A</span></div>
+<textarea id="appIdValue" cols="100" rows="6" readonly placeholder="webConfig / App ID surface output"></textarea>
+
 <h3>Summary</h3>
 <div id="summary"></div>
 <hr/>
@@ -186,14 +200,16 @@ function buildConfig() {
     const apiKey    = document.getElementById("apiKey").value.trim();
     const bucket    = document.getElementById("bucket").value.trim() || `${projectId}.appspot.com`;
     const rtdbUrl   = document.getElementById("rtdbUrl").value.trim() || `https://${projectId}-default-rtdb.firebaseio.com`;
+    const appId     = document.getElementById("appId").value.trim() || "1:111:web:111";
+    const measurementId = document.getElementById("measurementId").value.trim() || "111222";
     cfg = {
         apiKey,
         authDomain: `${projectId}.firebaseapp.com`,
         databaseURL: rtdbUrl,
         projectId,
         storageBucket: bucket,
-        appId: "111",
-        measurementId: "111222"
+        appId,
+        measurementId
     };
     document.getElementById("configValue").value = JSON.stringify(cfg, null, 2);
     return cfg;
@@ -868,6 +884,119 @@ async function remoteConfigFetch() {
     }
 }
 
+/* ============================ 9. APP ID ATTACK SURFACE ============================ */
+function hasRealAppId() { return cfg.appId && !/^1:111:/.test(cfg.appId); }
+
+// With only the appId, firebase.googleapis.com returns the full web app config:
+// apiKey, projectId, messagingSenderId (= project number), storageBucket, measurementId...
+// This means an appId leaked in a JS bundle or decompiled app yields the entire config.
+async function webConfigLeak() {
+    if (!hasRealAppId()) { setStatus("webConfigStatus", "no real App ID provided", "info"); return; }
+    const urls = [
+        `https://firebase.googleapis.com/v1alpha/projects/-/apps/${cfg.appId}/webConfig?key=${cfg.apiKey}`,
+        `https://firebase.googleapis.com/v1alpha/projects/-/apps/${cfg.appId}/webConfig`
+    ];
+    for (const url of urls) {
+        const r = await fetchJson(url);
+        if (r.status === 0) { setStatus("webConfigStatus", "CORS-blocked", "info"); return; }
+        if (r.ok && r.body && r.body.projectId) {
+            document.getElementById("appIdValue").value = JSON.stringify(r.body, null, 2);
+            if (r.body.messagingSenderId) PROJECT_NUMBER = PROJECT_NUMBER || r.body.messagingSenderId;
+            setStatus("webConfigStatus", `LEAKED: project=${r.body.projectId} sender=${r.body.messagingSenderId || "?"} bucket=${r.body.storageBucket || "?"}`, "bad");
+            finding("MEDIUM", "Full web config retrievable from App ID alone",
+                `firebase.googleapis.com/webConfig returned apiKey/projectId/messagingSenderId/storageBucket for ${cfg.appId}`);
+            return;
+        }
+    }
+    setStatus("webConfigStatus", "Not retrievable (needs valid appId + key)", "info");
+}
+
+// If the App Check DEBUG provider is enabled in production, a debug token is exchanged for a
+// real App Check token -> App Check enforcement is fully bypassable from any client.
+async function appCheckDebugBypass() {
+    if (!hasRealAppId() || !PROJECT_NUMBER) { setStatus("appCheckDebugStatus", "needs App ID + project number", "info"); return; }
+    const url = `https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${cfg.appId}:exchangeDebugToken?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({debugToken: "00000000-0000-0000-0000-000000000000"})});
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("appCheckDebugStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.token) {
+        setStatus("appCheckDebugStatus", "BYPASS — debug token exchanged for App Check token", "bad");
+        finding("HIGH", "App Check debug provider enabled in production",
+            "exchangeDebugToken issued a valid App Check token — enforcement is bypassable with a debug token.");
+    } else if (/debug.*(not|unknown|invalid)|invalid.*debug|not.*registered/i.test(msg)) {
+        setStatus("appCheckDebugStatus", "Debug path reachable, token rejected (register a real one?)", "warn");
+        finding("MEDIUM", "App Check debug provider appears reachable",
+            "exchangeDebugToken rejected only the token value, not the debug path — a leaked/registered debug token would bypass App Check.");
+    } else {
+        setStatus("appCheckDebugStatus", msg ? msg.slice(0, 70) : ("HTTP " + r.status), "ok");
+    }
+}
+
+// Which App Check attestation provider does the app accept?
+async function appCheckProviderProbe() {
+    if (!hasRealAppId() || !PROJECT_NUMBER) { setStatus("appCheckProviderStatus", "needs App ID + project number", "info"); return; }
+    const url = `https://firebaseappcheck.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${cfg.appId}:exchangeRecaptchaV3Token?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({recaptchaV3Token: "x"})});
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("appCheckProviderStatus", "CORS-blocked", "info"); return; }
+    if (/not.*configured|no.*reCAPTCHA|PROVIDER_NOT|not.*found/i.test(msg)) {
+        setStatus("appCheckProviderStatus", "reCAPTCHA v3 provider NOT configured", "info");
+    } else {
+        setStatus("appCheckProviderStatus", msg ? msg.slice(0, 70) : ("HTTP " + r.status), "info");
+    }
+}
+
+// FCM registration surface — can an app instance register for push without App Check?
+async function fcmRegisterProbe() {
+    if (!PROJECT_NUMBER) { setStatus("fcmStatus", "needs project number", "info"); return; }
+    const url = `https://fcmregistrations.googleapis.com/v1/projects/${PROJECT_NUMBER}/registrations`;
+    const r = await fetchJson(url, {method: "POST",
+        headers: {"Content-Type": "application/json", "x-goog-api-key": cfg.apiKey, "x-goog-firebase-installations-auth": "fbaudit"},
+        body: JSON.stringify({web: {endpoint: "https://fcm.googleapis.com/fcm/send/fbaudit", p256dh: "BBBB", auth: "AAAA"}})});
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("fcmStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.token) {
+        setStatus("fcmStatus", "Registration ACCEPTED (push token issued)", "bad");
+        finding("LOW", "FCM web registration open",
+            "fcmregistrations accepted a registration — push-token registration surface is open (no App Check).");
+    } else if (/APP_CHECK|app.?check/i.test(msg)) {
+        setStatus("fcmStatus", "App Check enforced on FCM", "ok");
+    } else {
+        setStatus("fcmStatus", msg ? msg.slice(0, 70) : ("HTTP " + r.status), "info");
+    }
+}
+
+// Enumerate / download Firebase ML custom models (model theft).
+async function firebaseMlProbe() {
+    if (!PROJECT_NUMBER) { setStatus("firebaseMlStatus", "needs project number", "info"); return; }
+    const h = idToken ? {"Authorization": "Bearer " + idToken} : {};
+    const listUrl = `https://firebaseml.googleapis.com/v1beta2/projects/${PROJECT_NUMBER}/models?key=${cfg.apiKey}`;
+    const r = await fetchJson(listUrl, {headers: h});
+    if (r.status === 0) { setStatus("firebaseMlStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.models) {
+        const names = r.body.models.map(m => m.displayName || (m.name || "").split("/").pop());
+        setStatus("firebaseMlStatus", `Listed ${names.length} model(s): ${names.slice(0, 5).join(", ")}`, "bad");
+        finding("MEDIUM", "Firebase ML models enumerable", names.join(", "));
+        return;
+    }
+    // list denied -> try downloading common model names
+    const commons = ["model", "default", "mobilenet", "detector", "classifier", "face", "ocr"];
+    const hits = [];
+    for (const name of commons) {
+        const dl = `https://firebaseml.googleapis.com/v1beta2/projects/${PROJECT_NUMBER}/models/${name}:download?key=${cfg.apiKey}`;
+        const rr = await fetchJson(dl, {headers: h});
+        if (rr.ok && rr.body && (rr.body.downloadUri || rr.body.modelFormat)) hits.push(name);
+    }
+    if (hits.length) {
+        setStatus("firebaseMlStatus", `Downloadable models: ${hits.join(", ")}`, "bad");
+        finding("MEDIUM", "Firebase ML custom model download", hits.join(", "));
+    } else {
+        setStatus("firebaseMlStatus", "No models listed/downloadable (" + r.status + ")", "ok");
+    }
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -891,6 +1020,9 @@ async function run(readOnly = false) {
     firestore = firebase.firestore();
     storage = firebase.storage();
     database = firebase.database();
+
+    // 9a. App ID -> webConfig leak first, so the project number it yields feeds everything below
+    await webConfigLeak();
 
     // 0. Identity
     await tryAnon();
@@ -946,6 +1078,12 @@ async function run(readOnly = false) {
     // 7. Installations / recon  (8. Remote Config needs the project number this yields)
     await installationsRegister();
     await remoteConfigFetch();
+
+    // 9. App ID attack surface (needs the project number from webConfig/installations)
+    await appCheckDebugBypass();
+    await appCheckProviderProbe();
+    await fcmRegisterProbe();
+    await firebaseMlProbe();
 
     // summary counts
     const tally = {};
