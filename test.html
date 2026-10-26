@@ -35,6 +35,11 @@ requests (CORS). For a complete audit including those, use the companion Python 
 </p>
 
 <div class="row">
+    <label>Paste firebaseConfig:</label>
+    <textarea id="configPaste" rows="3" style="width:70%;vertical-align:top" placeholder="Paste the firebaseConfig {...} object or JSON here, then click Parse"></textarea>
+    <button onclick="parseConfigPaste()">Parse &amp; fill</button>
+</div>
+<div class="row">
     <label>ProjectID:</label>
     <input id="projectId" type="text" value="your-project-id"/>
     <label style="margin-left:20px">ApiKey:</label>
@@ -90,6 +95,8 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">API key referrer restriction</span><span class="status info" id="keyRestrictStatus">N/A</span></div>
 <div class="row"><span class="label">Login error enumeration oracle</span><span class="status info" id="loginEnumStatus">N/A</span></div>
 <div class="row"><span class="label">Password policy (weak pw signup)</span><span class="status info" id="pwPolicyStatus">N/A</span></div>
+<div class="row"><span class="label">Phone auth endpoint (SMS abuse)</span><span class="status info" id="phoneAuthStatus">N/A</span></div>
+<div class="row"><span class="label">GameCenter sign-in reachable</span><span class="status info" id="gameCenterStatus">N/A</span></div>
 <textarea id="claimsValue" cols="100" rows="6" readonly></textarea>
 <textarea id="projectConfigValue" cols="100" rows="6" readonly placeholder="getProjectConfig response"></textarea>
 
@@ -110,6 +117,7 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">Write test value</span><span class="status info" id="dbEditStatus">N/A</span></div>
 <div class="row"><span class="label">Security rules leak (.settings/rules.json)</span><span class="status info" id="dbRulesStatus">N/A</span></div>
 <div class="row"><span class="label">Query read (/users orderBy)</span><span class="status info" id="dbQueryStatus">N/A</span></div>
+<div class="row"><span class="label">Regional RTDB instances (*.firebasedatabase.app)</span><span class="status info" id="dbRegionalStatus">N/A</span></div>
 <textarea id="dbValue" cols="100" rows="4" readonly></textarea>
 
 <h3>4. Cloud Storage</h3>
@@ -119,6 +127,7 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">GCS IAM list (bypasses FB rules)</span><span class="status info" id="gcsIamStatus">N/A</span></div>
 <div class="row"><span class="label">Bucket metadata (location/class)</span><span class="status info" id="gcsMetaStatus">N/A</span></div>
 <div class="row"><span class="label">Path-scoping bypass (crafted name)</span><span class="status info" id="storageTravStatus">N/A</span></div>
+<div class="row"><span class="label">Sensitive files (.env, service-account…)</span><span class="status info" id="storageSensStatus">N/A</span></div>
 
 <h3>5. Cloud Functions (best-effort probe)</h3>
 <div class="row"><span class="label">Common names × regions</span><span class="status info" id="functionsStatus">N/A</span></div>
@@ -1338,6 +1347,83 @@ async function rcNamespaceProbe() {
     }
 }
 
+/* ============================ CONFIG PASTE + EXTRA SURFACE ============================ */
+// Parse a pasted firebaseConfig (JS object or JSON) and fill the input fields.
+function parseConfigPaste() {
+    const txt = document.getElementById("configPaste").value;
+    if (!txt.trim()) return;
+    const alias = {apiKey:"apiKey", projectId:"projectId", appId:"appId", storageBucket:"bucket",
+        databaseURL:"rtdbUrl", measurementId:"measurementId"};
+    let obj = null;
+    try { obj = JSON.parse(txt); } catch (_) {
+        obj = {};
+        const re = /['"]?([A-Za-z0-9_]+)['"]?\s*:\s*['"]([^'"]+)['"]/g; let m;
+        while ((m = re.exec(txt)) !== null) obj[m[1]] = m[2];
+    }
+    let filled = [];
+    for (const [k, id] of Object.entries(alias)) {
+        if (obj[k]) { const el = document.getElementById(id); if (el) { el.value = obj[k]; filled.push(k); } }
+    }
+    alert(filled.length ? ("Filled: " + filled.join(", ")) : "No firebaseConfig fields found in paste");
+}
+
+// Identity: phone-auth (SMS abuse) + GameCenter endpoint reachability.
+async function authExtraProbes() {
+    const base = "https://identitytoolkit.googleapis.com/v1/accounts";
+    const rp = await fetchJson(`${base}:sendVerificationCode?key=${cfg.apiKey}`, {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: JSON.stringify({phoneNumber:"+15555550100", recaptchaToken:"x"})});
+    if (rp.status === 0) { setStatus("phoneAuthStatus","CORS-blocked","info"); }
+    else {
+        const msg = (rp.body && rp.body.error && rp.body.error.message) || "";
+        if (![400,403,404].includes(rp.status)) {
+            setStatus("phoneAuthStatus", `reachable (HTTP ${rp.status}) — SMS-abuse / OTP-brute surface`, "warn");
+            finding("MEDIUM", "Phone auth endpoint reachable", `sendVerificationCode HTTP ${rp.status} — possible SMS toll-fraud / OTP brute.`);
+        } else if (/MISSING_RECAPTCHA|reCAPTCHA/i.test(msg)) {
+            setStatus("phoneAuthStatus", "present but reCAPTCHA-gated", "info");
+        } else {
+            setStatus("phoneAuthStatus", msg ? msg.slice(0,60) : ("HTTP " + rp.status), "ok");
+        }
+    }
+    const rg = await fetchJson(`${base}:signInWithGameCenter?key=${cfg.apiKey}`, {method:"POST",
+        headers:{"Content-Type":"application/json"}, body: "{}"});
+    if (rg.status === 0) setStatus("gameCenterStatus","CORS-blocked","info");
+    else setStatus("gameCenterStatus", ![403,404].includes(rg.status) ? `reachable (HTTP ${rg.status})` : "not reachable", "info");
+}
+
+// RTDB instances in non-US regions live on *.firebasedatabase.app (not firebaseio.com).
+async function rtdbRegional() {
+    const hits = [];
+    for (const region of ["europe-west1","asia-southeast1","us-central1"]) {
+        const b = `https://${cfg.projectId}-default-rtdb.${region}.firebasedatabase.app`;
+        const u = b + "/.json?shallow=true" + (idToken ? "&auth=" + encodeURIComponent(idToken) : "");
+        const r = await fetchJson(u);
+        if (r.status === 0) { setStatus("dbRegionalStatus","CORS-blocked","info"); return; }
+        if (r.ok && r.text && r.text !== "null" && r.text !== "") {
+            hits.push(region);
+            finding(idToken ? "HIGH" : "CRITICAL", "Regional RTDB instance readable", `${b} root shallow-readable (${region})`);
+        }
+    }
+    setStatus("dbRegionalStatus", hits.length ? "READABLE in: " + hits.join(", ") : "none readable", hits.length ? "bad" : "ok");
+}
+
+// Try downloading well-known sensitive object names via alt=media.
+async function storageSensitiveFiles() {
+    const names = ["service-account.json","serviceAccount.json",".env","config.json","firebase-config.json",
+        "google-services.json","GoogleService-Info.plist","backup.json","users.json","credentials.json","secrets.json"];
+    const hits = [];
+    for (const n of names) {
+        const url = `${ST_BASE()}/${encodeURIComponent(n)}?alt=media&key=${cfg.apiKey}`;
+        const r = await fetchJson(url, {headers: authHeaders()});
+        if (r.status === 0) { setStatus("storageSensStatus","CORS-blocked","info"); return; }
+        if (r.ok && r.text) {
+            hits.push(n);
+            const sev = /service-account|serviceAccount|\.env|credentials|secrets/.test(n) ? "CRITICAL" : "HIGH";
+            finding(sev, "Sensitive object publicly accessible", `${cfg.storageBucket}/${n} — ${r.text.slice(0,100)}`);
+        }
+    }
+    setStatus("storageSensStatus", hits.length ? "DOWNLOADABLE: " + hits.join(", ") : "none accessible", hits.length ? "bad" : "ok");
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -1394,6 +1480,7 @@ async function run(readOnly = false) {
     await apiKeyRestrictionProbe();
     await loginEnumOracle();
     await passwordPolicyProbe();
+    await authExtraProbes();
 
     // 2. Firestore
     await firestoreListRoot();
@@ -1410,12 +1497,14 @@ async function run(readOnly = false) {
     await rtdbShallow();
     await rtdbRulesLeak();
     await rtdbQueryRead();
+    await rtdbRegional();
     await rtdbWriteTest();
 
     // 4. Storage
     await storageList();
     await gcsDirectList();
     await gcsBucketMeta();
+    await storageSensitiveFiles();
     await storageUploadTest();
     await storageUploadXss();
     await storageTraversalProbe();
