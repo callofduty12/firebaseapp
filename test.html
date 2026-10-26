@@ -53,6 +53,12 @@ requests (CORS). For a complete audit including those, use the companion Python 
     <input id="measurementId" type="text" placeholder="G-XXXXXXX"/>
 </div>
 <div class="row">
+    <label>Data Connect (optional):</label>
+    <input id="dcLocation" type="text" placeholder="location e.g. us-central1" style="width:200px"/>
+    <input id="dcService" type="text" placeholder="serviceId" style="width:160px"/>
+    <input id="dcConnector" type="text" placeholder="connectorId (default)" style="width:170px"/>
+</div>
+<div class="row">
     <label>Email (optional):</label>
     <input id="email" type="text"/>
     <label style="margin-left:20px">Password:</label>
@@ -127,7 +133,10 @@ requests (CORS). For a complete audit including those, use the companion Python 
 
 <h3>8. Remote Config leak</h3>
 <div class="row"><span class="label">Public template fetch</span><span class="status info" id="remoteConfigStatus">N/A</span></div>
-<textarea id="remoteConfigValue" cols="100" rows="6" readonly></textarea>
+<div class="row"><span class="label">Segment-gated params (spoofed signals)</span><span class="status info" id="rcSegmentStatus">N/A</span></div>
+<div class="row"><span class="label">Targeting bypass (admin/premium props)</span><span class="status info" id="rcBypassStatus">N/A</span></div>
+<div class="row"><span class="label">Secrets in config values</span><span class="status info" id="rcSecretStatus">N/A</span></div>
+<textarea id="remoteConfigValue" cols="100" rows="8" readonly></textarea>
 
 <h3>9. App ID attack surface</h3>
 <div class="row"><span class="label">webConfig leak (App ID → full config)</span><span class="status info" id="webConfigStatus">N/A</span></div>
@@ -144,6 +153,11 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">v3 setAccountInfo self-verify</span><span class="status info" id="v3SetStatus">N/A</span></div>
 <div class="row"><span class="label">signInWithIdp linking/takeover probe</span><span class="status info" id="idpStatus">N/A</span></div>
 <div class="row"><span class="label">App Check soft-enforcement (bad token)</span><span class="status info" id="appCheckSoftStatus">N/A</span></div>
+
+<h3>11. Extended services (firebase-js-sdk)</h3>
+<div class="row"><span class="label">AI Logic / Vertex (Gemini) abuse</span><span class="status info" id="aiLogicStatus">N/A</span></div>
+<div class="row"><span class="label">Data Connect (GraphQL) reachability</span><span class="status info" id="dataConnectStatus">N/A</span></div>
+<div class="row"><span class="label">Perf config (fireperf RC namespace)</span><span class="status info" id="rcNsStatus">N/A</span></div>
 
 <h3>Summary</h3>
 <div id="summary"></div>
@@ -625,6 +639,7 @@ async function initJsProbe() {
 
 /* ============================ 1b. AUTH EXTRAS ============================ */
 let PROJECT_NUMBER = null;
+let FIS_ID = null, FIS_TOKEN = null, RC_IID = null;   // Firebase Installations id/token for Remote Config
 
 // Legacy relyingparty endpoint: leaks authorizedDomains + enabled IdPs with only the apiKey.
 async function getProjectConfigLeak() {
@@ -861,6 +876,8 @@ async function installationsRegister() {
     if (r.ok && r.body) {
         const name = r.body.name || "";                 // projects/<NUMBER>/installations/<fid>
         PROJECT_NUMBER = name.split("/")[1] || PROJECT_NUMBER;
+        FIS_ID = r.body.fid || name.split("/").pop() || FIS_ID;
+        FIS_TOKEN = (r.body.authToken && r.body.authToken.token) || FIS_TOKEN;
         const hasToken = !!(r.body.authToken && r.body.authToken.token);
         setStatus("installStatus", `Registered (FIS token: ${hasToken ? "issued" : "none"})`, "warn");
         setStatus("projNumStatus", PROJECT_NUMBER ? ("Project number: " + PROJECT_NUMBER) : "unknown", "info");
@@ -872,24 +889,107 @@ async function installationsRegister() {
 }
 
 /* ============================ 8. REMOTE CONFIG ============================ */
-async function remoteConfigFetch() {
-    if (!PROJECT_NUMBER) { setStatus("remoteConfigStatus", "needs project number (run Installations first)", "info"); return; }
-    const url = `https://firebaseremoteconfig.googleapis.com/v1/projects/${PROJECT_NUMBER}/namespaces/firebase:fetch?key=${cfg.apiKey}`;
-    const r = await fetchJson(url, {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({appInstanceId: "fbaudit_" + Date.now(), appId: cfg.appId || "1:111:web:111"})
-    });
-    if (r.status === 0) { setStatus("remoteConfigStatus", "CORS-blocked", "info"); return; }
-    if (r.ok && r.body) {
-        const entries = r.body.entries || {};
-        const keys = Object.keys(entries);
-        document.getElementById("remoteConfigValue").value = JSON.stringify(r.body, null, 2);
-        setStatus("remoteConfigStatus", keys.length ? `Fetched ${keys.length} param(s): ${keys.slice(0, 8).join(", ")}` : "No params / NO_TEMPLATE", keys.length ? "warn" : "info");
-        if (keys.length) finding("LOW", "Remote Config parameters readable", `Leaked keys: ${keys.join(", ")}`);
-        if (/key|token|secret|endpoint|password|url/i.test(JSON.stringify(entries)))
-            finding("MEDIUM", "Remote Config may contain sensitive values", "Inspect params for API keys / endpoints / feature flags");
+// Wire format taken from the firebase-js-sdk rest_client: POST /v1/projects/{projectId}/namespaces/
+// firebase:fetch?key=, snake_case body, If-None-Match:* forces a full (non-cached) fetch. The backend
+// also honors country_code / app_version / analytics_user_properties / custom_signals even though the
+// web SDK omits them — so these targeting signals are client-spoofable.
+function rcInstanceId() {
+    if (!RC_IID) {
+        RC_IID = FIS_ID || "c" + Array.from({length:21}, () =>
+            "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random()*36)]).join("");
+    }
+    return RC_IID;    // stable across the audit so differences are attributable to spoofed signals
+}
+async function rcFetch(signals) {
+    const url = `https://firebaseremoteconfig.googleapis.com/v1/projects/${cfg.projectId}/namespaces/firebase:fetch?key=${cfg.apiKey}`;
+    const body = Object.assign({
+        sdk_version: "0.6.4",
+        app_instance_id: rcInstanceId(),
+        app_id: cfg.appId || "1:111:web:111"
+    }, signals || {});
+    if (FIS_TOKEN) body.app_instance_id_token = FIS_TOKEN;
+    const r = await fetchJson(url, {method:"POST",
+        headers:{"Content-Type":"application/json", "If-None-Match":"*"}, body: JSON.stringify(body)});
+    if (r.status === 0) return {cors:true};
+    return {ok:r.ok, status:r.status,
+            entries:(r.body && r.body.entries) || {},
+            state:(r.body && r.body.state) || null,
+            version:(r.body && r.body.templateVersion) || null,
+            personalization: r.body && r.body.personalizationMetadata};
+}
+
+async function remoteConfigAudit() {
+    if (!cfg.projectId) { setStatus("remoteConfigStatus", "needs projectId", "info"); return; }
+    const base = await rcFetch({});
+    if (base.cors) { setStatus("remoteConfigStatus", "CORS-blocked", "info"); return; }
+
+    const seen = {};  // key -> Set of distinct JSON-stringified values seen across all fetches
+    const record = (entries) => { for (const [k,v] of Object.entries(entries)) (seen[k] = seen[k] || new Set()).add(JSON.stringify(v)); };
+    const baseKeys = Object.keys(base.entries);
+    record(base.entries);
+
+    if (!baseKeys.length && (base.state === "NO_TEMPLATE" || !base.ok)) {
+        setStatus("remoteConfigStatus", "no template / not fetchable (" + (base.state || base.status) + ")", "info");
     } else {
-        setStatus("remoteConfigStatus", "HTTP " + r.status, "info");
+        setStatus("remoteConfigStatus", `baseline: ${baseKeys.length} param(s)${base.version ? " (v" + base.version + ")" : ""}`, baseKeys.length ? "warn" : "info");
+        if (baseKeys.length) finding("LOW", "Remote Config parameters readable", "baseline keys: " + baseKeys.join(", "));
+    }
+    if (base.personalization) finding("INFO", "Remote Config personalization active", "personalizationMetadata present — per-user ML-tailored values in use.");
+
+    // --- Segment enumeration: spoof device/app signals, diff the returned params ---
+    const variants = [
+        {country_code:"US"},{country_code:"CN"},{country_code:"IN"},{country_code:"DE"},
+        {country_code:"RU"},{country_code:"IR"},{country_code:"KP"},{country_code:"BR"},
+        {language_code:"en"},{language_code:"zh"},{language_code:"ar"},{language_code:"ru"},
+        {app_version:"999.0.0"},{app_version:"0.0.1"},{app_build:"999999"},{platform_version:"999"},
+        {first_open_time:"1970-01-01T00:00:00Z"},{first_open_time:new Date().toISOString()},{time_zone:"Asia/Pyongyang"}
+    ];
+    const newKeys = new Set();
+    for (const v of variants) {
+        const r = await rcFetch(v);
+        if (r.ok) { for (const k of Object.keys(r.entries)) if (!baseKeys.includes(k)) newKeys.add(k); record(r.entries); }
+    }
+    const varied = Object.entries(seen).filter(([k,s]) => s.size > 1).map(([k]) => k);
+    if (newKeys.size || varied.length) {
+        setStatus("rcSegmentStatus", `${newKeys.size} segment-only key(s), ${varied.length} conditional value(s)`, "bad");
+        if (newKeys.size) finding("MEDIUM", "Hidden Remote Config params via spoofed targeting",
+            "Params returned only under spoofed device/segment signals: " + [...newKeys].join(", "));
+        if (varied.length) finding("LOW", "Remote Config conditional values enumerable",
+            "Values changed across spoofed segments (flags/gating): " + varied.join(", "));
+    } else {
+        setStatus("rcSegmentStatus", Object.keys(seen).length ? "no segment variance observed" : "no params", "ok");
+    }
+
+    // --- Targeting bypass: privileged analytics_user_properties & custom_signals ---
+    const priv = {is_admin:"true", role:"admin", tier:"premium", user_type:"vip", beta:"true", internal:"true", group:"testers"};
+    const bypassKeys = new Set();
+    for (const sig of [{analytics_user_properties: priv}, {custom_signals: priv}]) {
+        const r = await rcFetch(sig);
+        if (r.ok) for (const [k,v] of Object.entries(r.entries)) {
+            const s = seen[k]; if (!s || !s.has(JSON.stringify(v))) bypassKeys.add(k);
+            record({[k]: v});
+        }
+    }
+    if (bypassKeys.size) {
+        setStatus("rcBypassStatus", "VULNERABLE — privileged signals reveal config: " + [...bypassKeys].slice(0,6).join(", "), "bad");
+        finding("MEDIUM", "Remote Config targeting bypass via client signals",
+            "Setting admin/premium/internal analytics_user_properties or custom_signals returned config the baseline client never saw — feature/authorization gating trusts client-supplied targeting: " + [...bypassKeys].join(", "));
+    } else {
+        setStatus("rcBypassStatus", "no change from privileged signals", "ok");
+    }
+
+    // --- Secret scan across every value seen ---
+    const merged = Object.fromEntries(Object.entries(seen).map(([k,s]) =>
+        [k, [...s].map(x => { try { return JSON.parse(x); } catch(_) { return x; } })]));
+    document.getElementById("remoteConfigValue").value = JSON.stringify(merged, null, 2);
+    const dump = JSON.stringify(merged);
+    const secretRe = /(AIza[0-9A-Za-z_\-]{20,}|AKIA[0-9A-Z]{16}|sk_live_[0-9A-Za-z]{10,}|-----BEGIN|xox[baprs]-|ghp_[0-9A-Za-z]{20,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}|(?:api[_-]?key|secret|password|private[_-]?key|access[_-]?token)["']?\s*[:=])/i;
+    if (secretRe.test(dump)) {
+        setStatus("rcSecretStatus", "SECRET-LIKE values present — inspect box", "bad");
+        finding("HIGH", "Possible secrets in Remote Config values",
+            "Config values match secret patterns (API keys/tokens/JWTs/private keys). Remote Config is client-readable by design — secrets must not be stored there.");
+    } else {
+        setStatus("rcSecretStatus", "no obvious secrets in values", "ok");
     }
 }
 
@@ -1153,6 +1253,91 @@ async function storageTraversalProbe() {
     }
 }
 
+/* ============================ 11. EXTENDED SERVICES (from firebase-js-sdk) ============================ */
+// Firebase AI Logic (formerly Vertex AI in Firebase). Endpoint from packages/ai: POST to
+// firebasevertexai.googleapis.com/v1beta/projects/{p}/locations/global/publishers/google/models/
+// {model}:generateContent, API key in x-goog-api-key, App Check in X-Firebase-AppCheck (optional).
+// If it runs with only the web key, anyone can burn the project's Gemini quota/billing.
+async function aiLogicProbe() {
+    const task = READ_ONLY ? "countTokens" : "generateContent";   // countTokens is free (read-only safe)
+    const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+    const paths = [
+        (m) => `https://firebasevertexai.googleapis.com/v1beta/projects/${cfg.projectId}/locations/global/publishers/google/models/${m}:${task}`,
+        (m) => `https://firebasevertexai.googleapis.com/v1beta/projects/${cfg.projectId}/publishers/google/models/${m}:${task}`
+    ];
+    const body = JSON.stringify({contents: [{role: "user", parts: [{text: "Reply with the single word PONG"}]}],
+        generationConfig: {maxOutputTokens: 8}});
+    let lastMsg = "";
+    for (const m of models) for (const p of paths) {
+        const r = await fetchJson(p(m), {method: "POST",
+            headers: {"Content-Type": "application/json", "x-goog-api-key": cfg.apiKey}, body});
+        if (r.status === 0) { setStatus("aiLogicStatus", "CORS-blocked", "info"); return; }
+        const good = r.ok && r.body && (task === "countTokens" ? r.body.totalTokens !== undefined : !!r.body.candidates);
+        if (good) {
+            if (task === "generateContent") {
+                setStatus("aiLogicStatus", `VULNERABLE — ${m} inference ran with API key (no App Check)`, "bad");
+                finding("HIGH", "Unauthenticated Firebase AI Logic (Gemini) inference",
+                    `${m} generateContent returned a completion using only the web API key — billing/quota abuse + unrestricted model access; App Check not enforced on AI Logic.`);
+            } else {
+                setStatus("aiLogicStatus", `${m} reachable w/ key (App Check not blocking) — run full audit to confirm inference`, "warn");
+                finding("MEDIUM", "Firebase AI Logic reachable with API key",
+                    `${m} countTokens succeeded with only the web API key — App Check not enforced; generateContent likely abusable.`);
+            }
+            return;
+        }
+        lastMsg = (r.body && r.body.error && r.body.error.message) || ("HTTP " + r.status);
+        if (/APP_CHECK|app.?check/i.test(lastMsg)) { setStatus("aiLogicStatus", "App Check enforced on AI Logic", "ok"); return; }
+        if (/SERVICE_DISABLED|has not been used|not enabled|PERMISSION_DENIED/i.test(lastMsg)) { setStatus("aiLogicStatus", "AI Logic not enabled / permission denied", "info"); return; }
+    }
+    setStatus("aiLogicStatus", lastMsg ? lastMsg.slice(0, 70) : "not usable", "info");
+}
+
+// Firebase Data Connect (GraphQL over Cloud SQL). Needs location + serviceId (+ connectorId) because
+// those aren't in webConfig. Classifies reachability: a "operation not found" means the connector is
+// live and only a valid operationName is missing (enumerate those from the app bundle).
+async function dataConnectProbe() {
+    const loc = (document.getElementById("dcLocation").value || "").trim();
+    const svc = (document.getElementById("dcService").value || "").trim();
+    const conn = (document.getElementById("dcConnector").value || "").trim() || "default";
+    if (!loc || !svc) { setStatus("dataConnectStatus", "skipped — provide DC location + serviceId", "info"); return; }
+    const url = `https://firebasedataconnect.googleapis.com/v1/projects/${cfg.projectId}/locations/${loc}/services/${svc}/connectors/${conn}:executeQuery?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST", headers: {"Content-Type": "application/json", ...authHeaders()},
+        body: JSON.stringify({operationName: "fbaudit_probe", variables: {}})});
+    if (r.status === 0) { setStatus("dataConnectStatus", "CORS-blocked", "info"); return; }
+    const msg = (r.body && r.body.error && r.body.error.message) || "";
+    if (r.ok) {
+        setStatus("dataConnectStatus", "executeQuery 200 — operation ran!", "bad");
+        finding("HIGH", "Data Connect operation executed", `executeQuery ran on ${svc}/${conn} with only the API key.`);
+    } else if (/operation.*not.*found|unknown operation|operationName|not found in connector/i.test(msg)) {
+        setStatus("dataConnectStatus", "Connector REACHABLE (needs valid operationName)", "warn");
+        finding("LOW", "Data Connect connector reachable with API key",
+            `${svc}/${conn} accepted the request but needs a known operationName — pull connector ops from the app bundle to test IDOR/authz.`);
+    } else if (/PERMISSION_DENIED|UNAUTHENTICATED/i.test(msg)) {
+        setStatus("dataConnectStatus", "Auth required (" + msg.slice(0, 40) + ")", "ok");
+    } else if (r.status === 404) {
+        setStatus("dataConnectStatus", "service/connector not found (404)", "info");
+    } else {
+        setStatus("dataConnectStatus", msg ? msg.slice(0, 60) : ("HTTP " + r.status), "info");
+    }
+}
+
+// Performance Monitoring keeps its sampling config in the 'fireperf' Remote Config namespace.
+async function rcNamespaceProbe() {
+    if (!cfg.projectId) { setStatus("rcNsStatus", "needs projectId", "info"); return; }
+    const url = `https://firebaseremoteconfig.googleapis.com/v1/projects/${cfg.projectId}/namespaces/fireperf:fetch?key=${cfg.apiKey}`;
+    const r = await fetchJson(url, {method: "POST",
+        headers: {"Content-Type": "application/json", "If-None-Match": "*"},
+        body: JSON.stringify({sdk_version: "0.6.4", app_instance_id: rcInstanceId(), app_id: cfg.appId || "1:111:web:111"})});
+    if (r.status === 0) { setStatus("rcNsStatus", "CORS-blocked", "info"); return; }
+    if (r.ok && r.body) {
+        const keys = Object.keys(r.body.entries || {});
+        setStatus("rcNsStatus", keys.length ? `fireperf ns: ${keys.length} param(s)` : `fireperf state=${r.body.state || "none"}`, keys.length ? "warn" : "info");
+        if (keys.length) finding("LOW", "Performance Monitoring config (fireperf namespace) readable", keys.join(", "));
+    } else {
+        setStatus("rcNsStatus", "HTTP " + r.status, "info");
+    }
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -1160,7 +1345,7 @@ async function storageTraversalProbe() {
 async function run(readOnly = false) {
     READ_ONLY = readOnly;
     FINDINGS = [];
-    PROJECT_NUMBER = null;
+    PROJECT_NUMBER = null; FIS_ID = null; FIS_TOKEN = null; RC_IID = null;
     document.getElementById("summary").innerHTML = "";
     buildConfig();
 
@@ -1243,7 +1428,7 @@ async function run(readOnly = false) {
 
     // 7. Installations / recon  (8. Remote Config needs the project number this yields)
     await installationsRegister();
-    await remoteConfigFetch();
+    await remoteConfigAudit();
 
     // 9. App ID attack surface (needs the project number from webConfig/installations)
     await appCheckDebugBypass();
@@ -1258,6 +1443,11 @@ async function run(readOnly = false) {
     await v3SetAccountVerified();
     await idpTakeoverProbe();
     await appCheckSoftProbe();
+
+    // 11. Extended services discovered from firebase-js-sdk packages
+    await aiLogicProbe();
+    await dataConnectProbe();
+    await rcNamespaceProbe();
 
     // summary counts
     const tally = {};
