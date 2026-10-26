@@ -70,6 +70,10 @@ requests (CORS). For a complete audit including those, use the companion Python 
     <input id="password" type="password"/>
 </div>
 <div class="row">
+    <label>ID token (optional):</label>
+    <input id="idTokenInput" type="text" style="width:70%" placeholder="paste a captured Firebase idToken to test as that user (IDOR)"/>
+</div>
+<div class="row">
     <button id="runBtn" onclick="run()">▶ Run Full Audit</button>
     <button onclick="runReadOnly()">▶ Read-Only Mode</button>
     <button onclick="downloadReport()">⬇ Download JSON Report</button>
@@ -168,6 +172,14 @@ requests (CORS). For a complete audit including those, use the companion Python 
 <div class="row"><span class="label">Data Connect (GraphQL) reachability</span><span class="status info" id="dataConnectStatus">N/A</span></div>
 <div class="row"><span class="label">Perf config (fireperf RC namespace)</span><span class="status info" id="rcNsStatus">N/A</span></div>
 
+<h3>12. IDOR &amp; authenticated authz (dual-identity)</h3>
+<div class="row"><span class="label">Caller identity (from token)</span><span class="status info" id="idorCallerStatus">N/A</span></div>
+<div class="row"><span class="label">Firestore horizontal IDOR (read B→A)</span><span class="status info" id="idorFsReadStatus">N/A</span></div>
+<div class="row"><span class="label">Firestore horizontal IDOR (write B→A)</span><span class="status info" id="idorFsWriteStatus">N/A</span></div>
+<div class="row"><span class="label">RTDB horizontal IDOR (read B→A)</span><span class="status info" id="idorRtdbStatus">N/A</span></div>
+<div class="row"><span class="label">Storage horizontal IDOR (read B→A)</span><span class="status info" id="idorStorageStatus">N/A</span></div>
+<div class="row"><span class="label">Over-broad authed collections</span><span class="status info" id="idorPrivStatus">N/A</span></div>
+
 <h3>Summary</h3>
 <div id="summary"></div>
 <hr/>
@@ -185,6 +197,7 @@ let app, auth, firestore, storage, database;
 let cfg = {};
 let idToken = null, localId = null, refreshToken = null;
 let READ_ONLY = false;
+let PROVIDED_TOKEN = false;   // true when the user pasted an idToken — keep it authoritative
 
 const TIMEOUT = 12000;
 
@@ -251,10 +264,12 @@ function buildConfig() {
 async function tryAnon() {
     try {
         const cred = await auth.signInAnonymously();
-        idToken = await cred.user.getIdToken();
-        localId = cred.user.uid;
-        refreshToken = cred.user.refreshToken;
-        setStatus("anonymousStatus", "VULNERABLE — anonymous token issued (uid=" + localId + ")", "bad");
+        if (!PROVIDED_TOKEN) {
+            idToken = await cred.user.getIdToken();
+            localId = cred.user.uid;
+            refreshToken = cred.user.refreshToken;
+        }
+        setStatus("anonymousStatus", "VULNERABLE — anonymous token issued (uid=" + cred.user.uid + ")", "bad");
         finding("HIGH", "Anonymous auth enabled", "Anyone can get an authenticated ID token without credentials.");
         return true;
     } catch (e) {
@@ -265,9 +280,11 @@ async function tryAnon() {
 async function tryEmailSignup(email, pwd) {
     try {
         const cred = await auth.createUserWithEmailAndPassword(email, pwd);
-        idToken = await cred.user.getIdToken();
-        localId = cred.user.uid;
-        refreshToken = cred.user.refreshToken;
+        if (!PROVIDED_TOKEN) {
+            idToken = await cred.user.getIdToken();
+            localId = cred.user.uid;
+            refreshToken = cred.user.refreshToken;
+        }
         setStatus("createAccountStatus", "OPEN signup — new account for " + email, "bad");
         finding("MEDIUM", "Open email/password signup", `New account created for ${email} without verification gate.`);
         return true;
@@ -279,9 +296,11 @@ async function tryEmailSignup(email, pwd) {
 async function tryEmailLogin(email, pwd) {
     try {
         const cred = await auth.signInWithEmailAndPassword(email, pwd);
-        idToken = await cred.user.getIdToken();
-        localId = cred.user.uid;
-        refreshToken = cred.user.refreshToken;
+        if (!PROVIDED_TOKEN) {
+            idToken = await cred.user.getIdToken();
+            localId = cred.user.uid;
+            refreshToken = cred.user.refreshToken;
+        }
         setStatus("normalLoginStatus", "Login OK for " + email, "warn");
         return true;
     } catch (e) {
@@ -1424,6 +1443,82 @@ async function storageSensitiveFiles() {
     setStatus("storageSensStatus", hits.length ? "DOWNLOADABLE: " + hits.join(", ") : "none accessible", hits.length ? "bad" : "ok");
 }
 
+/* ============================ 12. IDOR / AUTHENTICATED AUTHZ ============================ */
+// Dual-identity test: identity A is the current session (a pasted idToken, or email/anon login);
+// identity B is a throwaway anonymous account. We check whether B can read/write A's user-scoped
+// data (horizontal IDOR, assuming the common doc-id == uid pattern) and whether any signed-in user
+// can read privileged collections (over-broad auth!=null rules).
+async function idorSuite() {
+    if (!idToken) { setStatus("idorCallerStatus", "no session (paste a token, or use email/anon)", "info"); return; }
+    const claims = decodeJwt(idToken) || {};
+    const uidA = localId || claims.user_id || claims.sub || claims.localId;
+    setStatus("idorCallerStatus", `uid=${uidA || "?"} claims=[${Object.keys(claims).join(",").slice(0,70)}]`, "info");
+    if (claims.admin || claims.role === "admin" || claims.isAdmin)
+        finding("INFO", "Caller token carries privileged claims", JSON.stringify({admin:claims.admin, role:claims.role, isAdmin:claims.isAdmin}));
+    if (!uidA) { setStatus("idorFsReadStatus", "no uid in token", "info"); return; }
+
+    // Mint identity B (throwaway anonymous account) for the A/B comparison.
+    const sb = await fetchJson(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${cfg.apiKey}`,
+        {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({returnSecureToken:true})});
+    const tokenB = sb.ok && sb.body ? sb.body.idToken : null;
+    const uidB = sb.ok && sb.body ? sb.body.localId : null;
+    const hA = {"Authorization": "Bearer " + idToken};
+    const hB = tokenB ? {"Authorization": "Bearer " + tokenB} : null;
+
+    // In full mode, seed A's own doc so the cross-read is meaningful.
+    if (!READ_ONLY) {
+        await fetchJson(`${FS_BASE()}/users/${uidA}?key=${cfg.apiKey}`, {method:"PATCH",
+            headers:{"Content-Type":"application/json", ...hA},
+            body: JSON.stringify({fields:{fbaudit_secret:{stringValue:"A-only-" + Date.now()}}})});
+    }
+
+    if (!hB) {
+        setStatus("idorFsReadStatus", "couldn't mint 2nd identity (anon signup off)", "info");
+    } else {
+        // Firestore cross-user READ: B reads A's doc across common user-scoped collections.
+        const cols = ["users","profiles","accounts","orders","wallets","settings","private"];
+        let readHit = null;
+        for (const col of cols) {
+            const r = await fetchJson(`${FS_BASE()}/${col}/${uidA}?key=${cfg.apiKey}`, {headers: hB});
+            if (r.ok) { readHit = col; finding("HIGH", "Firestore horizontal IDOR (read)", `identity B (${uidB}) read ${col}/${uidA} — another user's document`); break; }
+        }
+        setStatus("idorFsReadStatus", readHit ? `IDOR — B read ${readHit}/${uidA}` : "cross-read blocked", readHit ? "bad" : "ok");
+
+        // Firestore cross-user WRITE: B modifies A's doc (account-takeover primitive).
+        if (!READ_ONLY) {
+            const w = await fetchJson(`${FS_BASE()}/users/${uidA}?key=${cfg.apiKey}`, {method:"PATCH",
+                headers:{"Content-Type":"application/json", ...hB},
+                body: JSON.stringify({fields:{fbaudit_idor_b:{booleanValue:true}}})});
+            if (w.ok) { setStatus("idorFsWriteStatus", `IDOR — B wrote users/${uidA}`, "bad");
+                finding("CRITICAL", "Firestore horizontal IDOR (write)", `identity B modified users/${uidA} — cross-user write / takeover primitive`); }
+            else setStatus("idorFsWriteStatus", "cross-write blocked", "ok");
+        } else setStatus("idorFsWriteStatus", "skipped (read-only)", "info");
+
+        // RTDB cross-user READ.
+        const rb = await fetchJson(`${cfg.databaseURL.replace(/\/$/,"")}/users/${uidA}.json?auth=${encodeURIComponent(tokenB)}`);
+        if (rb.ok && rb.text && rb.text !== "null") { setStatus("idorRtdbStatus", `IDOR — B read /users/${uidA}`, "bad");
+            finding("HIGH", "RTDB horizontal IDOR (read)", `identity B read /users/${uidA}`); }
+        else setStatus("idorRtdbStatus", "cross-read blocked/empty", "ok");
+
+        // Storage cross-user READ: B lists A's folder.
+        const rs = await fetchJson(`${ST_BASE()}?key=${cfg.apiKey}&prefix=${encodeURIComponent("users/" + uidA + "/")}&maxResults=5`, {headers: hB});
+        if (rs.ok && (rs.body.items || []).length) { setStatus("idorStorageStatus", `IDOR — B listed users/${uidA}/`, "bad");
+            finding("HIGH", "Storage horizontal IDOR (read)", `identity B listed users/${uidA}/ objects`); }
+        else setStatus("idorStorageStatus", "cross-read blocked/empty", "ok");
+    }
+
+    // Over-broad authenticated reads: any signed-in user reaching privileged collections.
+    const priv = ["admin","config","secrets","settings","billing","internal","apikeys"];
+    const hits = [];
+    for (const col of priv) {
+        const r = await fetchJson(`${FS_BASE()}/${col}?key=${cfg.apiKey}&pageSize=1`, {headers: hA});
+        if (r.ok && (r.body.documents || []).length) hits.push(col);
+    }
+    if (hits.length) { setStatus("idorPrivStatus", "authed read of: " + hits.join(", "), "bad");
+        finding("HIGH", "Over-broad authenticated read", `any signed-in user can read: ${hits.join(", ")} (auth!=null rules too permissive)`); }
+    else setStatus("idorPrivStatus", "no privileged collection readable", "ok");
+}
+
 /* ============================ ORCHESTRATOR ============================ */
 // FIX: run() previously reset READ_ONLY = false unconditionally, so the
 // "Read-Only Mode" button had no effect (it always performed writes).
@@ -1432,8 +1527,17 @@ async function run(readOnly = false) {
     READ_ONLY = readOnly;
     FINDINGS = [];
     PROJECT_NUMBER = null; FIS_ID = null; FIS_TOKEN = null; RC_IID = null;
+    idToken = null; localId = null; refreshToken = null; PROVIDED_TOKEN = false;
     document.getElementById("summary").innerHTML = "";
     buildConfig();
+
+    // A pasted idToken takes over as the active session (used for all authed tests + IDOR).
+    const pasted = document.getElementById("idTokenInput").value.trim();
+    if (pasted) {
+        idToken = pasted; PROVIDED_TOKEN = true;
+        const cl = decodeJwt(pasted) || {};
+        localId = cl.user_id || cl.sub || cl.localId || null;
+    }
 
     if (!cfg.projectId || !cfg.apiKey) {
         alert("Project ID and API key required");
@@ -1537,6 +1641,9 @@ async function run(readOnly = false) {
     await aiLogicProbe();
     await dataConnectProbe();
     await rcNamespaceProbe();
+
+    // 12. IDOR / authenticated authz (dual-identity)
+    await idorSuite();
 
     // summary counts
     const tally = {};
